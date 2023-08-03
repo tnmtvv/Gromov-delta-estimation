@@ -11,6 +11,6 @@ min_batch:            Minimum batch size
 min_rank:             Minimum rank
 max_batch:            Maximum batch size
 max_rank:             Maximum rank 
-grid_batch_size:      Num estimations on batch
-grid_rank:            Num estimations on rank
+grid_batch_size:      Num measurments on batch
+grid_rank:            Num measurments on rank
 ```
