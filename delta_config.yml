@@ -1,9 +1,10 @@
-Dependencies: [['Batch_size', 'Rank', 'Way']]
+Dependencies: [['Batch_size']]
 
 Default_vals:
-       'Rank': [1000]
+       'Rank': [3000]
        'Batch_size': [1000]
        'N_tries': [5]
+       'Way': ['old']
 
 
 
