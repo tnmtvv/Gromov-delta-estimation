@@ -1,4 +1,5 @@
 import csv
+import urllib
 from zipfile import ZipFile
 
 import numpy as np
@@ -10,11 +11,6 @@ import gzip
 import json
 
 from io import BytesIO
-
-try:
-    import networkx as nx
-except ImportError:
-    nx = None
 
 
 def reindex(raw_data, index, filter_invalid=True, names=None):
@@ -42,7 +38,6 @@ def reindex(raw_data, index, filter_invalid=True, names=None):
         if maybe_invalid.any():
             print(f"Filtered {maybe_invalid.sum()} invalid observations.")
             new_data = new_data.loc[~maybe_invalid]
-    return
 
 
 def matrix_from_observations(
@@ -177,31 +172,25 @@ def get_movielens_data(
 
 
 def make_list_params(
-    var_name, dataset_matrix, num_vals, up_bound, max_rank=None, max_batch=None
+    var_name, dataset_matrix, num_vals_batch_size, num_vals_rank, min_rank=None, min_batch=None, max_rank=None, max_batch=None
 ):
-    if not max_rank:
+    if not max_rank or max_rank > min(dataset_matrix.shape):
         max_rank = min(dataset_matrix.shape)
-    if not max_batch:
+    if not min_rank or min_rank > min(dataset_matrix.shape):
+        min_rank = 2
+
+    if not max_batch or max_batch > max(dataset_matrix.shape):
         max_batch = max(dataset_matrix.shape)
+    if not min_batch or min_batch > max(dataset_matrix.shape):
+        min_batch = 2
+
     if var_name == "Rank":
-        return [
-            j
-            for j in range(
-                max_rank // num_vals,
-                max_rank + max_rank // num_vals,
-                max_rank // num_vals,
-            )
-        ][:up_bound]
+        return np.linspace(min_rank, max_rank, num_vals_rank, dtype=int)
         # return [1000]
     if var_name == "Batch_size":
-        return [
-            j
-            for j in range(
-                max_batch // num_vals,
-                max_batch + max_batch // num_vals,
-                max_batch // num_vals,
-            )
-        ][:up_bound]
+        abs_min_batch = max(dataset_matrix.shape) * min_batch // 100
+        abs_max_batch = max(dataset_matrix.shape) * max_batch // 100
+        return np.linspace(abs_min_batch, abs_max_batch, num_vals_batch_size, dtype=int)
     if var_name == "N_tries":
         return range(10, 60, 10)
     if var_name == "Way":

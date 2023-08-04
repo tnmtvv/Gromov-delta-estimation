@@ -16,28 +16,6 @@ except ImportError:
     nx = None
 
 
-def calculate_delta(data, p=0):
-    dim = np.shape(data)[0]
-
-    g = np.zeros(shape=(dim, dim))
-    b = np.zeros(shape=(dim, dim))
-    mins_g = []
-
-    for i in range(dim):
-      for j in range(dim):
-        g[i, j] = 0.5 * (data[i, p] + data[p, j] - data[i, j])
-        for k in range(dim):
-            mins_g.append(0.5  * (data[0, k] + min(data[p, i] - data[k, i], data[p, j] - data[k, j])))
-        b[i, j] = max(mins_g)
-        mins_g = []
-    return np.amax(b - g)
-
-
-def norm_rel(dist_matr, delta):
-    diam = np.max(dist_matr)
-    return(2 * delta / diam)
-
-
 def delta_hyp(dismat: np.ndarray) -> float:
     """
     Computes Gromov's delta-hyperbolicity value from distance matrix using the maxmin product.
