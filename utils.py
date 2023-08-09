@@ -76,6 +76,7 @@ def matrix_from_observations(
 
 
 def parse_lines(path, fields):
+    """Parses lines from json file."""
     with gzip.open(path, "rt") as gz:
         for line in gz:
             yield json.loads(
@@ -84,6 +85,7 @@ def parse_lines(path, fields):
 
 
 def get_reviews(data_file):
+    """Converts raw data to csv."""
     fields = ["reviewerID", "asin"]
     lines = parse_lines(data_file, fields)
     pcore_data = pd.DataFrame.from_records(
@@ -172,8 +174,9 @@ def get_movielens_data(
 
 
 def make_list_params(
-    var_name, dataset_matrix, num_vals_batch_size, num_vals_rank, min_rank=None, min_batch=None, max_rank=None, max_batch=None
+    var_name, dataset_matrix, num_vals_batch_size, num_vals_rank, min_rank=None, min_batch=None, max_rank=None, max_batch=None, percents=True
 ):
+    """Builds lists of points, where estimations should be made."""
     if not max_rank or max_rank > min(dataset_matrix.shape):
         max_rank = min(dataset_matrix.shape)
     if not min_rank or min_rank > min(dataset_matrix.shape):
@@ -188,8 +191,12 @@ def make_list_params(
         return np.linspace(min_rank, max_rank, num_vals_rank, dtype=int)
         # return [1000]
     if var_name == "Batch_size":
-        abs_min_batch = max(dataset_matrix.shape) * min_batch // 100
-        abs_max_batch = max(dataset_matrix.shape) * max_batch // 100
+        if percents:
+            abs_min_batch = dataset_matrix.shape[1] * min_batch // 100
+            abs_max_batch = dataset_matrix.shape[1] * max_batch // 100
+        else:
+            abs_min_batch = min_batch
+            abs_max_batch = max_batch
         return np.linspace(abs_min_batch, abs_max_batch, num_vals_batch_size, dtype=int)
     if var_name == "N_tries":
         return range(10, 60, 10)
@@ -197,35 +204,10 @@ def make_list_params(
         return ["new", "old"]
 
 
-def add_data(
-    deltas_diams, time, k, b_s, n_try, way, dataset, csv_path, svd_Time, mult_Time
-):
+def add_data(csv_path, dict_vals):
+    """Adds data to csv file. """
     new_rows = []
-    deltas = list(map(lambda x: x[0], deltas_diams))
-    diams = list(map(lambda x: x[1], deltas_diams))
-    mean_delta = np.mean(deltas)
-    std_delta = np.std(deltas)
-    mean_diam = np.mean(diams)
-    std_diam = np.std(diams)
-    for l, delta in enumerate(deltas):
-        new_rows.append(
-            [
-                delta,
-                diams[l],
-                dataset,
-                mean_delta,
-                std_delta,
-                k,
-                b_s,
-                n_try,
-                mean_diam,
-                std_diam,
-                time,
-                svd_Time,
-                mult_Time,
-                way,
-            ]
-        )
+    new_rows.append(dict_vals.values())
     with open(csv_path, "a", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(new_rows)
