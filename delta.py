@@ -6,6 +6,7 @@ from scipy.sparse import csr_matrix
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
+# from sage.graphs.hyperbolicity import hyperbolicity
 
 from scipy.spatial.distance import pdist, squareform
 from numba import njit, prange, set_num_threads
@@ -45,6 +46,29 @@ def delta_hyp(dismat: np.ndarray) -> float:
     return np.max(maxmin - XY_p)
 
 
+def sample_hyperbolicity(adj_m, num_samples=100, seed=42):
+    hyps = []
+    for i in range(num_samples):
+        rng = np.random.default_rng()
+        node_tuple = rng.integers(low=0, high=adj_m.shape[0] - 1, size=4)
+        try:
+            d01 = adj_m[node_tuple[0], node_tuple[1]]
+            d23 = adj_m[node_tuple[2], node_tuple[3]]
+            d02 = adj_m[node_tuple[0], node_tuple[2]]
+            d13 = adj_m[node_tuple[1], node_tuple[3]]
+            d03 = adj_m[node_tuple[0], node_tuple[3]]
+            d12 = adj_m[node_tuple[1], node_tuple[2]]
+
+            s = [d01 + d23, d02 + d13, d03 + d12]
+            s.sort()
+            hyps.append((s[-1] - s[-2]))
+        except Exception as e:
+            continue
+
+    return 0.5 * np.max(hyps), 0.5 * np.mean(hyps)
+
+
+# @profile
 def batched_delta_hyp(
     X,
     n_tries=10,
@@ -132,6 +156,7 @@ def batched_delta_hyp(
     return results
 
 
+#@profile
 def delta_hyp_rel(X: np.ndarray, economic: bool = True):
     """
     Computes relative delta hyperbolicity value and diameter from coordinates matrix.
@@ -154,11 +179,18 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True):
     # dist_condensed = pairwise_distances(X)
     diam = np.max(dist_condensed)
     if economic:
+        # sq_matrix = squareform(dist_condensed)
         delta = delta_hyp_condensed(dist_condensed, X.shape[0])
+        # print('tries ' + str(tries))
+        # delta, _ = sample_hyperbolicity(squareform(dist_condensed))
     else:
         delta = delta_hyp(squareform(dist_condensed))
     delta_rel = 2 * delta / diam
     return delta_rel, diam
+
+
+# def delta_bccm():
+#     return hyperbolicity_BCCM
 
 
 @njit(parallel=True)
@@ -185,7 +217,6 @@ def delta_hyp_condensed(dist_condensed: np.ndarray, n_samples: int) -> float:
     "The metric dist(u=X[i], v=X[j]) is computed and stored in entry m * i + j - ((i + 2) * (i + 1)) // 2."
     Additionally, it implicitly assumes that j > i. Note that dist(u=X[0], v=X[k]) is defined by (k - 1)'s entry.
     """
-    set_num_threads(5)
     delta_hyp = np.zeros(n_samples, dtype=dist_condensed.dtype)
     for k in prange(n_samples):
         # as in `delta_hyp`, fixed point is selected at 0
@@ -229,6 +260,71 @@ def delta_hyp_condensed(dist_condensed: np.ndarray, n_samples: int) -> float:
                 gromov_ij = dist_0i + dist_0j - dist_ij
                 delta_hyp_k = max(
                     delta_hyp_k, dist_0k + min(diff_ik, diff_jk) - gromov_ij
+                )
+                # dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
+                # s1 = max(dist_array)
+                # dist_array.remove(s1)
+                # s2 = max(dist_array)
+                # delta_hyp_k = max(
+                #     delta_hyp_k, s1 - s2
+                # )
+        delta_hyp[k] = delta_hyp_k
+    return 0.5 * np.max(delta_hyp)
+
+
+@njit(parallel=True)
+def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int) -> float:
+    """
+    Compute the delta hyperbolicity value from the condensed distance matrix representation.
+    This is a more efficient analog of the `delta_hyp` function.
+
+    Parameters
+    ----------
+    dist_condensed : numpy.ndarray
+        A 1D array representing the condensed distance matrix of the network.
+    n_samples : int
+        The number of nodes in the network.
+
+    Returns
+    -------
+    float
+        The delta hyperbolicity of the network.
+
+    Notes
+    -----
+    Calculation heavily relies on the `scipy`'s `pdist` output format. According to the docs (as of v.1.10.1):
+    "The metric dist(u=X[i], v=X[j]) is computed and stored in entry m * i + j - ((i + 2) * (i + 1)) // 2."
+    Additionally, it implicitly assumes that j > i. Note that dist(u=X[0], v=X[k]) is defined by (k - 1)'s entry.
+    """
+    delta_hyp = np.zeros(n_samples, dtype=dist_condensed.dtype)
+    for k in prange(n_samples):
+        # as in `delta_hyp`, fixed point is selected at 0
+        delta_hyp_k = 0.0
+        dist_0k = dist_condensed[0][k - 1]
+
+        # сортим расстояния от k до остальных точек, индекс i будем выбирать из самых дальних 
+        inds_i = np.argsort(dist_condensed[k - 1])
+
+        # брать 10 процентов от размера выборки ?
+        for ind_i in inds_i[-15:]:
+            dist_0i = dist_condensed[0][ind_i]
+            dist_ik = dist_condensed[ind_i][k - 1]
+
+            # сортим расстояния от i до остальных точек, индекс j будем выбирать из самых дальних 
+            inds_j = np.argsort(dist_condensed[:, ind_i])
+            
+            for ind_j in inds_j[-15:]:
+                dist_0j = dist_condensed[0][ind_j]
+                dist_jk = dist_condensed[ind_j][k - 1]
+                dist_ij = dist_condensed[ind_i][ind_j]
+                
+                # алгоритм с S
+                dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
+                s1 = max(dist_array)
+                dist_array.remove(s1)
+                s2 = max(dist_array)
+                delta_hyp_k = max(
+                    delta_hyp_k, s1 - s2
                 )
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
