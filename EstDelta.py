@@ -21,6 +21,7 @@ from utils import (
     add_data,
 )
 
+
 def build_csv(
     datasets_dir,
     csv_dir,
@@ -73,7 +74,7 @@ def build_csv(
         if verbose:
             print(dataset_name)
         if dataset_name in ("ml-1m", "movieLens20m"):
-            cur_df = get_movielens_data('datasets/Zip/movieLens20m.zip')
+            cur_df = get_movielens_data("datasets/Zip/movieLens20m.zip")
             # cur_df = get_movielens_data("C:\work\GitHub\DeltaEstimation\datasets\movieLens20m.zip")
             matr_from_observ, u_id, i_id = matrix_from_observations(
                 cur_df, dtype=float, itemid="movieid"
@@ -93,10 +94,10 @@ def build_csv(
                 max_batch=max_batch,
                 percents=percents,
             )
-        print(val_list_dict['Batch_size'])
-        print(val_list_dict['N_tries'])
-        print(val_list_dict['Rank'])
-        max_rank = np.max(val_list_dict['Rank'])
+        print(val_list_dict["Batch_size"])
+        print(val_list_dict["N_tries"])
+        print(val_list_dict["Rank"])
+        max_rank = np.max(val_list_dict["Rank"])
         for way in val_list_dict["Way"]:
             # if way == "old":
             svd_time_start = timer()
@@ -104,14 +105,10 @@ def build_csv(
                 f"{dataset_name}_S_matrix_{max_rank}.npy"
                 and f"{dataset_name}_V_matrix_{max_rank}.npy" in svds
             ):
-                V = np.load(
-                    join(svd_dir, f"{dataset_name}_V_matrix_{max_rank}.npy")
-                )
-                S = np.load(
-                    join(svd_dir, f"{dataset_name}_S_matrix_{max_rank}.npy")
-                )
+                V = np.load(join(svd_dir, f"{dataset_name}_V_matrix_{max_rank}.npy"))
+                S = np.load(join(svd_dir, f"{dataset_name}_S_matrix_{max_rank}.npy"))
             else:
-                U, S, V = randomized_svd(matr_from_observ, n_components=max_rank)
+                _, S, V = randomized_svd(matr_from_observ, n_components=max_rank)
                 with open(
                     join(svd_dir, f"{dataset_name}_S_matrix_{max_rank}.npy"), "wb+"
                 ) as file:
@@ -136,14 +133,14 @@ def build_csv(
                     for n_try in val_list_dict["N_tries"]:
                         if not compare:
                             delta_time_start = timer()
-                            print('delta start')
+                            print("delta start")
                             deltas_diams = batched_delta_hyp(
                                 item_space,
                                 economic=True,
                                 batch_size=b_s,
                                 n_tries=n_try,
                                 seed=42,
-                                approach=way
+                                way=way,
                             )
 
                             delta_time = timer() - delta_time_start
@@ -151,7 +148,7 @@ def build_csv(
                             deltas = list(map(lambda x: x[0], deltas_diams))
                             diams = list(map(lambda x: x[1], deltas_diams))
 
-                            print('cur_mean ' + str(np.mean(deltas)))
+                            print("cur_mean " + str(np.mean(deltas)))
                             for d_idx, delta in enumerate(deltas):
                                 add_data(
                                     path_to_csv,
@@ -191,17 +188,17 @@ def build_csv(
 
 
 def main(
-        csv_name,
-        path_to_config,
-        min_batch,
-        min_rank,
-        max_batch,
-        max_rank,
-        grid_batch_size,
-        grid_rank,
-        compare,
-        verbose,
-        percents,
+    csv_name,
+    path_to_config,
+    min_batch,
+    min_rank,
+    max_batch,
+    max_rank,
+    grid_batch_size,
+    grid_rank,
+    compare,
+    verbose,
+    percents,
 ):
     with open(path_to_config, "r") as stream:
         try:
