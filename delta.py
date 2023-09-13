@@ -118,9 +118,7 @@ def batched_delta_hyp(
     seed=42,
     economic=True,
     max_workers=25,
-    rank=10,
     way="old",
-    approach="new",
 ):
     """
     Estimate the Gromov's delta hyperbolicity of a network using batch processing.
@@ -140,6 +138,8 @@ def batched_delta_hyp(
         If True, the function will use more memory-efficient methods. Default is True.
     max_workers : int or None, optional
         The maximum number of workers to use. If None, the number will be set to the number of available CPUs. Default is None.
+    way: string
+        Mode for calculations.
 
     Returns
     -------
@@ -153,12 +153,9 @@ def batched_delta_hyp(
     and then aggregates the results across all batches to obtain the final delta hyperbolicity value.
     If economic=True, the function will use more efficient version of delta_hyp to combat O(n^3) complexity.
     """
-    if way == "old" or way == "tensor":
-        n_objects, _ = X.shape
-    else:
-        _, n_objects = X.shape
+
+    n_objects, _ = X.shape
     results = []
-    # logger.info(f'Calculating delta on {min(batch_size, n_objects)} samples out of {n_objects}.')
     rng = np.random.default_rng(seed)
     max_workers = max_workers or cpu_count() - 1
     t = 0
@@ -174,28 +171,14 @@ def batched_delta_hyp(
                 # the fixed point always corresponds to the first object, so shuffling allows
                 # exploring different initialization of a fixed point
                 batch_idx = rng.permutation(n_objects)
-                if way == "old" or way == "tensor":
-                    batched_matr = csr_matrix(X[batch_idx])
-                else:
-                    batched_matr = csr_matrix(X[:, batch_idx])
             else:
                 batch_idx = rng.choice(
                     n_objects, batch_size, replace=False, shuffle=True
                 )
-                if way == "old" or way == "tensor":
-                    batched_matr = csr_matrix(X[batch_idx])
-                else:
-                    batched_matr = csr_matrix(X[:, batch_idx])
-            if way == "old" or way == "tensor":
-                item_space = X[batch_idx]
-            else:
-                _, S, V = randomized_svd(batched_matr, n_components=rank)
-                indices = np.flip(np.argsort(S))
-                new_S = [S[i] for i in indices]
-                item_space = V.T[:, indices[:rank]] @ np.diag(new_S)
+            item_space = X[batch_idx]
             print("batch done")
             future = executor.submit(
-                delta_hyp_rel, item_space, economic=economic, way=approach
+                delta_hyp_rel, item_space, economic=economic, way=way
             )
             futures.append(future)
         for i, future in enumerate(as_completed(futures)):
@@ -230,7 +213,7 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     diam = np.max(dist_condensed)
     dist_matrix = squareform(dist_condensed)
     if economic:
-        if way == "new":
+        if way == "heuristic":
             const = min(15, X.shape[0] - 1)
             delta = delta_hyp_condensed_new(dist_matrix, X.shape[0], const)
         elif way == "rand_top":
@@ -244,34 +227,12 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             delta = tensor_approximation(
                 d=3, b_s=dist_matrix.shape[0], func=objective_func
             )
-            # with ThreadPoolExecutor(max_workers=min(48, dist_matrix.shape[0])) as executor:
-            #     futures = []
-            #     deltas = []
-            #     for k in range(dist_matrix.shape[0]):
-            #         objective_func = delta_execution(dist_matrix, k)
-            #         future = executor.submit(tensor_approximation, d=2, b_s=dist_matrix.shape[0], func=objective_func)
-            #         futures.append(future)
-            #     for i, future in enumerate(as_completed(futures)):
-            #         res = future.result()
-            #         deltas.append(res)
-            # delta = np.max(deltas)
         else:
             delta = delta_hyp_condensed(dist_condensed, X.shape[0])
     else:
         delta = delta_hyp(squareform(dist_condensed))
     delta_rel = 2 * delta / diam
     return delta_rel, diam
-
-
-#
-# def parallel_tensor(dist_matrix):
-#     cur_max_delta = 0.0
-#     for k in prange(dist_matrix.shape[0]):
-#         objective_func = delta_execution(dist_matrix, k)
-#         b_s = dist_matrix.shape[0]
-#         delta = tensor_approximation(d=2, b_s=b_s, func=objective_func)
-#         cur_max_delta = max(cur_max_delta, delta)
-#     return cur_max_delta
 
 
 def delta_protes(dist_matrix):
@@ -438,11 +399,6 @@ def tensor_approximation(d, b_s, func):
         k_gd=2,
     )
     return y_opt
-    # targ = Target(d, b_s, func)
-    # opti = OptiTensProtes(targ, m=1.E+5, log_info=True, log_file=False)
-    # opti.run()
-    # opti.save()
-    # return opti.y_opt
 
 
 @njit(parallel=True)
@@ -522,7 +478,6 @@ def delta_hyp_condensed_rand_top(
     dist: np.ndarray, n_samples, const, mode="rand"
 ) -> float:
     delta_hyp = np.zeros(n_samples, dtype=dist.dtype)
-    # seen = np.array([0, 0, 0])
 
     for k in prange(n_samples):
         # as in `delta_hyp`, fixed point is selected at 0
@@ -552,9 +507,6 @@ def delta_hyp_condensed_rand_top(
             # dist_condensed[ind_i][k - 1] = 0.0
 
             # сортим расстояния от i до остальных точек, индекс j будем выбирать из самых дальних
-            # inds_j = np.argpartition(dist[:, ind_i], n_samples - (const + 1))
-            #
-            # considered_j = inds_j[-const:]
 
             if mode == "top_k":
                 inds_j = np.argpartition(dist[ind_i - 1], -const)
@@ -631,12 +583,10 @@ def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -
         for ind_i in considered_i:
             dist_0i = dist_condensed[0][ind_i]
             dist_ik = dist_condensed[ind_i][k - 1]
-            # dist_condensed[ind_i][k - 1] = 0.0
 
             # сортим расстояния от i до остальных точек, индекс j будем выбирать из самых дальних
             inds_j = np.argpartition(dist_condensed[:, ind_i], n_samples - (const + 1))
             considered_j = inds_j[-const:]
-            # considered_j = considered_j[(considered_j != k)]
 
             for ind_j in considered_j:
                 cur_indxs = np.asarray([k, ind_i, ind_j])
@@ -646,18 +596,12 @@ def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -
                 dist_jk = dist_condensed[ind_j][k - 1]
                 dist_ij = dist_condensed[ind_i][ind_j]
 
-                # dist_condensed[ind_j][k - 1] = 0.0
-                # dist_condensed[ind_i][ind_j] = 0.0
-                # dist_condensed[0][ind_j] = 0.0
-
                 # алгоритм с S
                 dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
                 s1 = max(dist_array)
                 dist_array.remove(s1)
                 s2 = max(dist_array)
                 delta_hyp_k = max(delta_hyp_k, s1 - s2)
-                # else:
-                #     continue
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
 
