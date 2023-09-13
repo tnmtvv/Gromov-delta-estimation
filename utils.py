@@ -1,5 +1,6 @@
 import csv
-import urllib
+import math
+import urllib.request
 from zipfile import ZipFile
 
 import numpy as np
@@ -111,16 +112,17 @@ def get_movielens_data(
         fields.append("timestamp")
     if not local_file:
         # downloading data
-        zip_file_url = "http://files.grouplens.org/datasets/movielens/ml-1m.zip"
+        zip_file_url = "http://files.grouplens.org/datasets/movielens/ml-20m.zip"
         with urllib.request.urlopen(zip_file_url) as zip_response:
             zip_contents = BytesIO(zip_response.read())
+        print("downloaded")
     else:
         zip_contents = local_file
     ml_data = ml_genres = ml_tags = mapping = None
     # loading data into memory
     with ZipFile(zip_contents) as zfile:
         zip_files = pd.Series(zfile.namelist())
-        zip_file = zip_files[zip_files.str.contains("ratings")].iat[0]
+        zip_file = zip_files[zip_files.str.contains("rating")].iat[0]
         is_new_format = (
             ("latest" in zip_file) or ("20m" in zip_file) or ("25m" in zip_file)
         )
@@ -174,7 +176,16 @@ def get_movielens_data(
 
 
 def make_list_params(
-    var_name, dataset_matrix, num_vals_batch_size, num_vals_rank, min_rank=None, min_batch=None, max_rank=None, max_batch=None, percents=True
+    var_name,
+    dataset_matrix,
+    num_vals_batch_size,
+    num_vals_rank,
+    num_tries=None,
+    min_rank=None,
+    min_batch=None,
+    max_rank=None,
+    max_batch=None,
+    percents=True,
 ):
     """Builds lists of points, where estimations should be made."""
     if not max_rank or max_rank > min(dataset_matrix.shape):
@@ -188,24 +199,44 @@ def make_list_params(
         min_batch = 2
 
     if var_name == "Rank":
-        return np.linspace(min_rank, max_rank, num_vals_rank, dtype=int)
+        # abs_min_rank = min(dataset_matrix.shape) * min_rank // 100
+        # abs_max_rank = min(dataset_matrix.shape) * max_rank // 100
+        abs_min_rank = min_rank
+        abs_max_rank = max_rank
+        return np.linspace(abs_min_rank, abs_max_rank, num_vals_rank, dtype=int)
+        # return [32, 64, 128, 256, 512, 1024, 1536, 2048, 3072]
+
         # return [1000]
     if var_name == "Batch_size":
         if percents:
+            print(dataset_matrix.shape)
             abs_min_batch = dataset_matrix.shape[1] * min_batch // 100
             abs_max_batch = dataset_matrix.shape[1] * max_batch // 100
+            # abs_min_batch = min_batch
+            # abs_max_batch = max_batch
         else:
             abs_min_batch = min_batch
             abs_max_batch = max_batch
+            # print(int(math.log2(abs_max_batch)))
+
+        # return [
+        #     2**i
+        #     for i in range(
+        #         int(math.log2(abs_min_batch)),
+        #         int(np.round(math.log2(abs_max_batch))) + 1,
+        #         1,
+        #     )
+        # ]
         return np.linspace(abs_min_batch, abs_max_batch, num_vals_batch_size, dtype=int)
+        # return [3617, 7234, 10851, 14468, 18085]
     if var_name == "N_tries":
-        return range(10, 60, 10)
+        return [25]
     if var_name == "Way":
-        return ["new", "old"]
+        return ["top_rand", "new"]
 
 
 def add_data(csv_path, dict_vals):
-    """Adds data to csv file. """
+    """Adds data to csv file."""
     new_rows = []
     new_rows.append(dict_vals.values())
     with open(csv_path, "a", newline="") as file:
