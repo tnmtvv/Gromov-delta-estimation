@@ -1,8 +1,13 @@
 import numpy as np
 import time
+import typing
 
 from sklearn.utils.extmath import randomized_svd
 from scipy.sparse import csr_matrix
+
+from scipy.spatial.distance import euclidean
+from sklearn.metrics import pairwise_distances
+from hyplearn import hyp_learn_euclidean_distances
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
@@ -12,8 +17,9 @@ from timeit import default_timer as timer
 # import sage.all
 # from sage.graphs.hyperbolicity import hyperbolicity_BCCM
 
-from scipy.spatial.distance import pdist, squareform
-from numba import njit, prange, set_num_threads
+from scipy.spatial.distance import pdist, cdist, squareform
+from fastdist import fastdist
+from numba import njit, prange, set_num_threads, typed
 
 # from Opti import Target
 # from teneva_opti import *
@@ -82,11 +88,11 @@ def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
     n_samples = adj_m.shape[0]
     # delta_hyp = np.zeros(n_samples, dtype=adj_m.dtype)
     delta_hyp = 0.0
-    for i in range(1, len(far_apart_pairs)):
+    for i in prange(1, min(300000, len(far_apart_pairs))):
         pair_1 = far_apart_pairs[i]
-        if adj_m[pair_1[0]][pair_1[1]] < 2 * delta_hyp:
-            return delta_hyp
-        for j in prange(len(far_apart_pairs)):
+        # if adj_m[pair_1[0]][pair_1[1]] < 2 * delta_hyp:
+        #     return delta_hyp
+        for j in prange(i):
             pair_2 = far_apart_pairs[j]
             if pair_2[0] not in pair_1 and pair_2[1] not in pair_1:
                 i = pair_1[0]
@@ -105,8 +111,7 @@ def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
 
                 cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
                 delta_hyp = max(delta_hyp, cur_del)
-            else:
-                continue
+
     return delta_hyp
 
 
@@ -153,8 +158,10 @@ def batched_delta_hyp(
     and then aggregates the results across all batches to obtain the final delta hyperbolicity value.
     If economic=True, the function will use more efficient version of delta_hyp to combat O(n^3) complexity.
     """
-
+    print("true X shape" + str(X.shape))
     n_objects, _ = X.shape
+    # _, n_objects = X.shape
+
     results = []
     rng = np.random.default_rng(seed)
     max_workers = max_workers or cpu_count() - 1
@@ -208,14 +215,25 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
         A tuple consisting of the relative delta hyperbolicity value (delta_rel) and the diameter of the manifold (diam).
 
     """
-    dist_condensed = pdist(X)
-    print(X.shape)
-    diam = np.max(dist_condensed)
-    dist_matrix = squareform(dist_condensed)
+    # dist_matrix = hyp_learn_euclidean_distances(X, triangular=True)
+    dist_matrix = pairwise_distances(X, metric="euclidean")
+    # print(X.shape)
+    # dist_matrix = squareform(dist_condensed)
+    diam = np.max(dist_matrix)
+
     if economic:
         if way == "heuristic":
-            const = min(15, X.shape[0] - 1)
-            delta = delta_hyp_condensed_new(dist_matrix, X.shape[0], const)
+            far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+            print("true: " + str(len(far_away_pairs)))
+            delta = delta_Nastyas(dist_matrix, far_away_pairs, 100000)
+        elif way == "CCL":
+            print("ccl")
+            far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+            delta = delta_hyp_condensed_CCL(far_away_pairs, dist_matrix)
+        elif way == "article":
+            delta = delta_hyp_condensed_article(
+                dist_matrix, k=(dist_matrix.shape[0] * 30) // 100
+            )
         elif way == "rand_top":
             const = min(50, X.shape[0] - 1)
             delta = delta_hyp_condensed_rand_top(
@@ -227,10 +245,6 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             delta = tensor_approximation(
                 d=3, b_s=dist_matrix.shape[0], func=objective_func
             )
-        else:
-            delta = delta_hyp_condensed(dist_condensed, X.shape[0])
-    else:
-        delta = delta_hyp(squareform(dist_condensed))
     delta_rel = 2 * delta / diam
     return delta_rel, diam
 
@@ -604,6 +618,128 @@ def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -
                 delta_hyp_k = max(delta_hyp_k, s1 - s2)
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
+
+
+def get_far_away_pairs(A, N):
+    a = zip(*np.unravel_index(np.argsort(-A.ravel())[:N], A.shape))
+    return [(i, j) for (i, j) in a if i < j]
+
+
+@njit(paralell=True)
+def delta_Nastyas(A, far_away_pairs, i_break=50000):
+    h_lb = 0
+    h_ub = np.inf
+
+    for pid in prange(min(i_break, len(far_away_pairs))):
+        if pid >= i_break:
+            break
+
+        p = far_away_pairs[pid]
+        x, y = p
+
+        dist = A[p]
+
+        if dist < h_ub:
+            if h_ub <= h_lb:
+                break
+
+            h_ub = dist
+
+        if dist <= h_lb:
+            # delta всегда меньше чем минимальное расстояние в четверке точек, если мы будем рассматривать четверки с текущим dist, то знаем, что дельту больше dist мы уже не получим,
+            # значит h_lb не обновится, так что можно остановиться
+            break
+
+        for inx in prange(pid):
+            v = far_away_pairs[inx][0]
+            w = far_away_pairs[inx][1]
+
+            S1 = A[x, y] + A[v, w]
+            S2 = A[x, v] + A[y, w]
+            S3 = A[x, w] + A[y, v]
+            h_lb = max(h_lb, S1 - max(S2, S3))
+
+            if h_ub == h_lb:
+                break
+
+    return h_lb / 2
+
+
+@njit
+def set_intersect(lst1, lst2):
+    return set(lst1).intersection(set(lst2))
+
+
+@njit
+def loop_intersection(lst1, lst2):
+    result = []
+    for element1 in lst1:
+        for element2 in lst2:
+            if element1 == element2:
+                result.append(element1)
+    return result
+
+
+# @profile
+@njit(parallel=True)
+def delta_hyp_condensed_article(dist_condensed: np.ndarray, k: int) -> float:
+    """
+    Compute the delta hyperbolicity value from the condensed distance matrix representation.
+    This is a more efficient analog of the `delta_hyp` function.
+
+    Parameters
+    ----------
+    dist_condensed : numpy.ndarray
+        A 1D array representing the condensed distance matrix of the network.
+    n_samples : int
+        The number of nodes in the network.
+
+    Returns
+    -------
+    float
+        The delta hyperbolicity of the network.
+
+    Notes
+    -----
+    Calculation heavily relies on the `scipy`'s `pdist` output format. According to the docs (as of v.1.10.1):
+    "The metric dist(u=X[i], v=X[j]) is computed and stored in entry m * i + j - ((i + 2) * (i + 1)) // 2."
+    Additionally, it implicitly assumes that j > i. Note that dist(u=X[0], v=X[k]) is defined by (k - 1)'s entry.
+    """
+    delta_hyp = 0
+
+    n_samples = dist_condensed.shape[0]
+    x = np.random.randint(1, n_samples)
+
+    indx_a = np.argmax(dist_condensed[x - 1])
+
+    indx_b = np.argmax(dist_condensed[indx_a])
+    dist_a_b = dist_condensed[indx_a][indx_b]
+
+    S_a = np.where(dist_condensed[indx_a] >= dist_a_b / 2)[0]
+    S_b = np.where(dist_condensed[indx_b] >= dist_a_b / 2)[0]
+    # print("S_a")
+    # print(S_a)
+
+    c_indxs = loop_intersection(typed.List(S_a), typed.List(S_b))[:k]
+    for i in prange(len(c_indxs)):
+        indx_c = c_indxs[i]
+        dist_a_c = dist_condensed[indx_a][indx_c]
+        dist_b_c = dist_condensed[indx_b][indx_c]
+        for indx_d in prange(n_samples):
+            # if indx_d != indx_a and indx_d != indx_b:
+            dist_a_d = dist_condensed[indx_a][indx_d]
+            dist_b_d = dist_condensed[indx_b][indx_d]
+            dist_c_d = dist_condensed[indx_c][indx_d]
+            dist_array = [
+                dist_a_b + dist_c_d,
+                dist_a_c + dist_b_d,
+                dist_a_d + dist_b_c,
+            ]
+            s1 = max(dist_array)
+            dist_array.remove(s1)
+            s2 = max(dist_array)
+            delta_hyp = max(delta_hyp, s1 - s2)
+    return 0.5 * delta_hyp
 
 
 def relative_delta_poincare(tol=1e-5):
