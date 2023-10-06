@@ -625,7 +625,7 @@ def get_far_away_pairs(A, N):
     return [(i, j) for (i, j) in a if i < j]
 
 
-@njit(paralell=True)
+@njit(parallel=True)
 def delta_Nastyas(A, far_away_pairs, i_break=50000):
     h_lb = 0
     h_ub = np.inf
@@ -646,7 +646,8 @@ def delta_Nastyas(A, far_away_pairs, i_break=50000):
             h_ub = dist
 
         if dist <= h_lb:
-            # delta всегда меньше чем минимальное расстояние в четверке точек, если мы будем рассматривать четверки с текущим dist, то знаем, что дельту больше dist мы уже не получим,
+            # delta всегда меньше чем минимальное расстояние в четверке точек,
+            # если мы будем рассматривать четверки с текущим dist, то знаем, что дельту больше dist мы уже не получим,
             # значит h_lb не обновится, так что можно остановиться
             break
 
