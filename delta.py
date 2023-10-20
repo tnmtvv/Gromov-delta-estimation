@@ -1,6 +1,8 @@
 import numpy as np
 import time
 import typing
+import sys
+import gc
 
 from sklearn.utils.extmath import randomized_svd
 from scipy.sparse import csr_matrix
@@ -19,7 +21,7 @@ from timeit import default_timer as timer
 
 from scipy.spatial.distance import pdist, cdist, squareform
 from fastdist import fastdist
-from numba import njit, prange, set_num_threads, typed
+from numba import njit, jit, prange, set_num_threads, typed, cuda
 
 # from Opti import Target
 # from teneva_opti import *
@@ -61,58 +63,61 @@ def delta_hyp(dismat: np.ndarray) -> float:
     return np.max(maxmin - XY_p)
 
 
-# def sample_hyperbolicity(adj_m, num_samples=100, seed=42):
-#     hyps = []
-#     for i in range(num_samples):
-#         rng = np.random.default_rng()
-#         node_tuple = rng.integers(low=0, high=adj_m.shape[0] - 1, size=4)
-#         try:
-#             d01 = adj_m[node_tuple[0], node_tuple[1]]
-#             d23 = adj_m[node_tuple[2], node_tuple[3]]
-#             d02 = adj_m[node_tuple[0], node_tuple[2]]
-#             d13 = adj_m[node_tuple[1], node_tuple[3]]
-#             d03 = adj_m[node_tuple[0], node_tuple[3]]
-#             d12 = adj_m[node_tuple[1], node_tuple[2]]
-#
-#             s = [d01 + d23, d02 + d13, d03 + d12]
-#             s.sort()
-#             hyps.append((s[-1] - s[-2]))
-#         except Exception as e:
-#             continue
-#
-#     return 0.5 * np.max(hyps), 0.5 * np.mean(hyps)
-
-
-@njit(parallel=True)
+@njit(parallel=True, fastmath=True)
 def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
     n_samples = adj_m.shape[0]
-    # delta_hyp = np.zeros(n_samples, dtype=adj_m.dtype)
     delta_hyp = 0.0
     for i in prange(1, min(300000, len(far_apart_pairs))):
         pair_1 = far_apart_pairs[i]
-        # if adj_m[pair_1[0]][pair_1[1]] < 2 * delta_hyp:
-        #     return delta_hyp
         for j in prange(i):
             pair_2 = far_apart_pairs[j]
-            if pair_2[0] not in pair_1 and pair_2[1] not in pair_1:
-                i = pair_1[0]
-                j = pair_1[1]
-                v = pair_2[0]
-                w = pair_2[1]
+            # if pair_2[0] not in pair_1 and pair_2[1] not in pair_1:
+            i = pair_1[0]
+            j = pair_1[1]
+            v = pair_2[0]
+            w = pair_2[1]
 
-                d_ij = adj_m[i][j]
-                d_iw = adj_m[i][w]
-                d_iv = adj_m[i][v]
+            d_ij = adj_m[i][j]
+            d_iw = adj_m[i][w]
+            d_iv = adj_m[i][v]
 
-                d_jw = adj_m[j][w]
-                d_jv = adj_m[j][v]
+            d_jw = adj_m[j][w]
+            d_jv = adj_m[j][v]
 
-                d_vw = adj_m[v][w]
+            d_vw = adj_m[v][w]
 
-                cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
-                delta_hyp = max(delta_hyp, cur_del)
+            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+            delta_hyp = max(delta_hyp, cur_del)
 
     return delta_hyp
+
+
+@cuda.jit()
+def delta_hyp_CCL_GPU(x_coord_pairs, y_coord_pairs, adj_m, results):
+    n_samples = x_coord_pairs.shape[0]
+    idx = cuda.grid(1)
+    if idx >= n_samples:
+        return
+    i = x_coord_pairs[idx]
+    j = y_coord_pairs[idx]
+
+    results[idx] = 0
+
+    for k in range(idx):
+        v = x_coord_pairs[k]
+        w = y_coord_pairs[k]
+
+        d_ij = adj_m[i][j]
+        d_iw = adj_m[i][w]
+        d_iv = adj_m[i][v]
+
+        d_jw = adj_m[j][w]
+        d_jv = adj_m[j][v]
+
+        d_vw = adj_m[v][w]
+
+        cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+        results[idx] = max(delta_hyp, cur_del)
 
 
 # @profile
@@ -217,6 +222,10 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     """
     # dist_matrix = hyp_learn_euclidean_distances(X, triangular=True)
     dist_matrix = pairwise_distances(X, metric="euclidean")
+    # dist_condensed =
+    del X
+    gc.collect()
+    print("matrix size: " + str(sys.getsizeof(dist_matrix)))
     # print(X.shape)
     # dist_matrix = squareform(dist_condensed)
     diam = np.max(dist_matrix)
@@ -224,12 +233,21 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     if economic:
         if way == "heuristic":
             far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
-            print("true: " + str(len(far_away_pairs)))
-            delta = delta_Nastyas(dist_matrix, far_away_pairs, 100000)
+            print("pairs len " + str(len(far_away_pairs)))
+            print("pairs size: " + str(sys.getsizeof(far_away_pairs)))
+            delta = delta_Nastyas(dist_matrix, typed.List(far_away_pairs), 100000)
+            # delta_Nastyas.parallel_diagnostics(level=4)
         elif way == "CCL":
             print("ccl")
             far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
             delta = delta_hyp_condensed_CCL(far_away_pairs, dist_matrix)
+        elif way == "GPU":
+                x_coords, y_coords = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+                x_coord_pairs = cuda.to_device(list(x_coords))
+                y_coord_pairs = cuda.to_device(list(y_coords))
+                adj_m = cuda.to_device(adj_m, dtype="float32")
+                results = cuda.to_device(list(np.zeros(len(x_coords))))
+                delta_hyp_CCL_GPU(x_coord_pairs, y_coord_pairs, adj_m, results)
         elif way == "article":
             delta = delta_hyp_condensed_article(
                 dist_matrix, k=(dist_matrix.shape[0] * 30) // 100
@@ -620,49 +638,69 @@ def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -
     return 0.5 * np.max(delta_hyp)
 
 
+def get_far_away_pairs_from_raw_arr(X):
+    pairs = []
+    n = X.shape[0]
+    m = X.shape[1]
+    for i in range(n):
+        for j in range(i, m):
+            value = euclidean(X[i, :], X[:, j])
+
+
+@jit(fastmath=True)
 def get_far_away_pairs(A, N):
     a = zip(*np.unravel_index(np.argsort(-A.ravel())[:N], A.shape))
     return [(i, j) for (i, j) in a if i < j]
 
 
 @njit(parallel=True)
+def s_delta(far_away_pairs, A, pid, x, y, h_lb):
+    delta_hyp = np.zeros(pid, dtype=A.dtype)
+    for inx in prange(pid):
+        v = far_away_pairs[inx][0]
+        w = far_away_pairs[inx][1]
+
+        S1 = A[x, y] + A[v, w]
+        S2 = A[x, v] + A[y, w]
+        S3 = A[x, w] + A[y, v]
+        delta_hyp[inx] = S1 - max(S2, S3)
+    return np.max(delta_hyp)
+
+
 def delta_Nastyas(A, far_away_pairs, i_break=50000):
     h_lb = 0
     h_ub = np.inf
 
-    for pid in prange(min(i_break, len(far_away_pairs))):
-        if pid >= i_break:
-            break
+    print(len(far_away_pairs))
 
+    # lbs = []
+    # ubs = []
+    for pid in range(1, min(i_break, len(far_away_pairs))):
         p = far_away_pairs[pid]
         x, y = p
 
         dist = A[p]
 
-        if dist < h_ub:
-            if h_ub <= h_lb:
-                break
+        # if dist < h_ub:
+        #     if h_ub <= h_lb:
+        #         print("here")
+        #         return h_lb / 2
 
-            h_ub = dist
+        #     h_ub = dist
 
-        if dist <= h_lb:
-            # delta всегда меньше чем минимальное расстояние в четверке точек,
-            # если мы будем рассматривать четверки с текущим dist, то знаем, что дельту больше dist мы уже не получим,
-            # значит h_lb не обновится, так что можно остановиться
-            break
+        # if dist <= h_lb:
+        #     print("break d < hlb")
+        #     return h_lb / 2
 
-        for inx in prange(pid):
-            v = far_away_pairs[inx][0]
-            w = far_away_pairs[inx][1]
+        # lbs.append(h_lb)
+        # ubs.append(h_ub)
 
-            S1 = A[x, y] + A[v, w]
-            S2 = A[x, v] + A[y, w]
-            S3 = A[x, w] + A[y, v]
-            h_lb = max(h_lb, S1 - max(S2, S3))
+        h_lb = max(h_lb, s_delta(far_away_pairs, A, pid, x, y, h_lb))
 
-            if h_ub == h_lb:
-                break
+        # if h_ub == h_lb:
+        #     break
 
+    # print("before leaving")
     return h_lb / 2
 
 
