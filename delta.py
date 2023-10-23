@@ -92,32 +92,32 @@ def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
     return delta_hyp
 
 
-@cuda.jit()
-def delta_hyp_CCL_GPU(x_coord_pairs, y_coord_pairs, adj_m, results):
-    n_samples = x_coord_pairs.shape[0]
+@cuda.jit
+def delta_hyp_CCL_GPU(n, x_coord_pairs, y_coord_pairs, adj_m, results):
+    n_samples = n
     idx = cuda.grid(1)
-    if idx >= n_samples:
-        return
-    i = x_coord_pairs[idx]
-    j = y_coord_pairs[idx]
+    if idx < n_samples:
+        i = x_coord_pairs[idx]
+        j = y_coord_pairs[idx]
 
-    results[idx] = 0
+        results[idx] = 0
+        delta_hyp = 0
+        for k in range(idx):
+            v = x_coord_pairs[k]
+            w = y_coord_pairs[k]
 
-    for k in range(idx):
-        v = x_coord_pairs[k]
-        w = y_coord_pairs[k]
+            d_ij = adj_m[i][j]
+            d_iw = adj_m[i][w]
+            d_iv = adj_m[i][v]
 
-        d_ij = adj_m[i][j]
-        d_iw = adj_m[i][w]
-        d_iv = adj_m[i][v]
+            d_jw = adj_m[j][w]
+            d_jv = adj_m[j][v]
 
-        d_jw = adj_m[j][w]
-        d_jv = adj_m[j][v]
+            d_vw = adj_m[v][w]
 
-        d_vw = adj_m[v][w]
-
-        cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
-        results[idx] = max(delta_hyp, cur_del)
+            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+            delta_hyp = max(delta_hyp, cur_del)
+        results[idx] = delta_hyp
 
 
 # @profile
@@ -242,12 +242,25 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
             delta = delta_hyp_condensed_CCL(far_away_pairs, dist_matrix)
         elif way == "GPU":
-                x_coords, y_coords = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
-                x_coord_pairs = cuda.to_device(list(x_coords))
-                y_coord_pairs = cuda.to_device(list(y_coords))
-                adj_m = cuda.to_device(adj_m, dtype="float32")
-                results = cuda.to_device(list(np.zeros(len(x_coords))))
-                delta_hyp_CCL_GPU(x_coord_pairs, y_coord_pairs, adj_m, results)
+            x_coords, y_coords = (
+                list(zip(*far_away_pairs))[0],
+                list(zip(*far_away_pairs))[1],
+            )
+
+            x_coord_pairs = cuda.to_device(x_coords)
+            y_coord_pairs = cuda.to_device(y_coords)
+            adj_m = cuda.to_device(dist_matrix)
+            results = cuda.to_device(list(np.zeros(len(x_coord_pairs))))
+            n = len(x_coord_pairs)
+
+            threadsperblock = (32, 32)
+            blockspergrid_x = int(np.ceil(n / threadsperblock[0])) + 1
+            blockspergrid_y = int(np.ceil(n / threadsperblock[1])) + 1
+            blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+            delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
+                n, x_coord_pairs, y_coord_pairs, adj_m, results
+            )
         elif way == "article":
             delta = delta_hyp_condensed_article(
                 dist_matrix, k=(dist_matrix.shape[0] * 30) // 100
