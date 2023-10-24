@@ -15,112 +15,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 from timeit import default_timer as timer
 
-# import cython
-# import sage.all
-# from sage.graphs.hyperbolicity import hyperbolicity_BCCM
-
 from scipy.spatial.distance import pdist, cdist, squareform
 from fastdist import fastdist
 from numba import njit, jit, prange, set_num_threads, typed, cuda
 
-# from Opti import Target
-# from teneva_opti import *
-
 from protes import protes
 
-# try:
-#     import networkx as nx
-# except ImportError:
-#     nx = None
 
-
-def delta_hyp(dismat: np.ndarray) -> float:
-    """
-    Computes Gromov's delta-hyperbolicity value from distance matrix using the maxmin product.
-
-    Parameters:
-    -----------
-    dismat : numpy.ndarray
-        A square distance matrix of shape (n, n), where n is the number of nodes in a network.
-
-    Returns:
-    --------
-    float
-        The delta hyperbolicity value.
-
-    Notes:
-    ------
-    This is a naive implementation that can be very inefficient on large datasets.
-    Use `delta_hyp_condensed` function for scalable computations.
-    """
-
-    p = 0  # fixed point (hence the dataset should be shuffled for more reliable results)
-    row = dismat[p, :][np.newaxis, :]
-    col = dismat[:, p][:, np.newaxis]
-    XY_p = 0.5 * (row + col - dismat)
-
-    maxmin = np.max(np.minimum(XY_p[:, :, None], XY_p[None, :, :]), axis=1)
-    return np.max(maxmin - XY_p)
-
-
-@njit(parallel=True, fastmath=True)
-def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
-    n_samples = adj_m.shape[0]
-    delta_hyp = 0.0
-    for i in prange(1, min(300000, len(far_apart_pairs))):
-        pair_1 = far_apart_pairs[i]
-        for j in prange(i):
-            pair_2 = far_apart_pairs[j]
-            # if pair_2[0] not in pair_1 and pair_2[1] not in pair_1:
-            i = pair_1[0]
-            j = pair_1[1]
-            v = pair_2[0]
-            w = pair_2[1]
-
-            d_ij = adj_m[i][j]
-            d_iw = adj_m[i][w]
-            d_iv = adj_m[i][v]
-
-            d_jw = adj_m[j][w]
-            d_jv = adj_m[j][v]
-
-            d_vw = adj_m[v][w]
-
-            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
-            delta_hyp = max(delta_hyp, cur_del)
-
-    return delta_hyp
-
-
-@cuda.jit
-def delta_hyp_CCL_GPU(n, x_coord_pairs, y_coord_pairs, adj_m, results):
-    n_samples = n
-    idx = cuda.grid(1)
-    if idx < n_samples:
-        i = x_coord_pairs[idx]
-        j = y_coord_pairs[idx]
-
-        results[idx] = 0
-        delta_hyp = 0
-        for k in range(idx):
-            v = x_coord_pairs[k]
-            w = y_coord_pairs[k]
-
-            d_ij = adj_m[i][j]
-            d_iw = adj_m[i][w]
-            d_iv = adj_m[i][v]
-
-            d_jw = adj_m[j][w]
-            d_jv = adj_m[j][v]
-
-            d_vw = adj_m[v][w]
-
-            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
-            delta_hyp = max(delta_hyp, cur_del)
-        results[idx] = delta_hyp
-
-
-# @profile
 def batched_delta_hyp(
     X,
     n_tries=10,
@@ -128,44 +29,44 @@ def batched_delta_hyp(
     seed=42,
     economic=True,
     max_workers=25,
-    way="old",
+    way="heuristic",
 ):
     """
-    Estimate the Gromov's delta hyperbolicity of a network using batch processing.
+    Estimate the Gromov's delta hyperbolicity of a dataset using batch processing.
 
     Parameters
     ----------
     X : numpy.ndarray
-        A 2D array of shape (n, m), where n is the number of nodes in a network and m is the dimensionality of the space
+        A 2D array of shape (n, m), where n is the number of nodes in a dataset and m is the dimensionality of the space
         that the nodes are embedded in.
     n_tries : int, optional
-        The number of times to compute the delta hyperbolicity using different subsets of nodes. Default is 10.
+        The number of times to compute the delta hyperbolicity using different subsets of nodes.
     batch_size : int, optional
-        The number of nodes to process in each batch. Default is 1500.
+        The number of nodes to process in each batch.
     seed : int or None, optional
-        Seed used for the random generator in batch sampling. Default is None.
+        Seed used for the random generator in batch sampling. Default is 42.
     economic : bool, optional
         If True, the function will use more memory-efficient methods. Default is True.
     max_workers : int or None, optional
         The maximum number of workers to use. If None, the number will be set to the number of available CPUs. Default is None.
-    way: string
+    way : string
         Mode for calculations.
 
     Returns
     -------
     List[Tuple[float, float]]
-        A list of tuples containing the delta hyperbolicity and diameter values of the network for different batches.
+        A list of tuples containing the delta hyperbolicity and diameter values of the dataset for different batches.
 
     Notes
     -----
-    The function computes the delta hyperbolicity value of a network using batch processing.
+    The function computes the delta hyperbolicity value of a dataset using batch processing.
     For each batch of nodes, the function computes the pairwise distances, computes the delta hyperbolicity value,
     and then aggregates the results across all batches to obtain the final delta hyperbolicity value.
-    If economic=True, the function will use more efficient version of delta_hyp to combat O(n^3) complexity.
+    If economic=True, the function will use more efficient version of delta_hyp to combat better complexity.
+    Pass way parameter to choose the mode.
     """
     print("true X shape" + str(X.shape))
-    n_objects, _ = X.shape
-    # _, n_objects = X.shape
+    n_objects, _ = X.shape  # number of items
 
     results = []
     rng = np.random.default_rng(seed)
@@ -196,7 +97,6 @@ def batched_delta_hyp(
         for i, future in enumerate(as_completed(futures)):
             delta_rel, diam = res = future.result()
             print("res: " + str(res))
-            # logger.info(f'Trial {i + 1}/{n_tries} relative delta: {delta_rel} for estimated diameter: {diam}')
             results.append(res)
     return results
 
@@ -209,10 +109,12 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     Parameters:
     -----------
     X : numpy.ndarray
-        A 2D array of shape (n, m), where n is the number of nodes in a network and m is the dimensionality of the space
+        A 2D array of shape (n, m), where n is the number of nodes in a dataset and m is the dimensionality of the space
         that the nodes are embedded in.
     economic : bool, optional
         Whether to use the condensed distance matrix representation to compute the delta hyperbolicity value, by default True.
+    way: string
+        Which algo should be executed.
 
     Returns:
     --------
@@ -220,25 +122,22 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
         A tuple consisting of the relative delta hyperbolicity value (delta_rel) and the diameter of the manifold (diam).
 
     """
-    # dist_matrix = hyp_learn_euclidean_distances(X, triangular=True)
+
     dist_matrix = pairwise_distances(X, metric="euclidean")
-    # dist_condensed =
     del X
     gc.collect()
     print("matrix size: " + str(sys.getsizeof(dist_matrix)))
-    # print(X.shape)
-    # dist_matrix = squareform(dist_condensed)
+
     diam = np.max(dist_matrix)
 
     if economic:
-        if way == "heuristic":
+        if way == "heuristic_CCL":
             far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
             print("pairs len " + str(len(far_away_pairs)))
             print("pairs size: " + str(sys.getsizeof(far_away_pairs)))
-            delta = delta_Nastyas(dist_matrix, typed.List(far_away_pairs), 100000)
-            # delta_Nastyas.parallel_diagnostics(level=4)
+            delta = delta_CCL_heuristic(dist_matrix, typed.List(far_away_pairs), 100000)
         elif way == "CCL":
-            print("ccl")
+            print("CCL")
             far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
             delta = delta_hyp_condensed_CCL(far_away_pairs, dist_matrix)
         elif way == "GPU":
@@ -246,7 +145,6 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
                 list(zip(*far_away_pairs))[0],
                 list(zip(*far_away_pairs))[1],
             )
-
             x_coord_pairs = cuda.to_device(x_coords)
             y_coord_pairs = cuda.to_device(y_coords)
             adj_m = cuda.to_device(dist_matrix)
@@ -261,13 +159,14 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
                 n, x_coord_pairs, y_coord_pairs, adj_m, results
             )
-        elif way == "article":
-            delta = delta_hyp_condensed_article(
-                dist_matrix, k=(dist_matrix.shape[0] * 30) // 100
-            )
         elif way == "rand_top":
             const = min(50, X.shape[0] - 1)
             delta = delta_hyp_condensed_rand_top(
+                dist_matrix, X.shape[0], const, mode="top_rand"
+            )
+        elif way == "heuristic":
+            const = min(50, X.shape[0] - 1)
+            delta = delta_hyp_condensed_new(
                 dist_matrix, X.shape[0], const, mode="top_rand"
             )
         elif way == "tensor":
@@ -276,8 +175,144 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             delta = tensor_approximation(
                 d=3, b_s=dist_matrix.shape[0], func=objective_func
             )
+    else:
+        delta = delta_hyp(dist_matrix)
     delta_rel = 2 * delta / diam
     return delta_rel, diam
+
+
+def delta_hyp(dismat: np.ndarray) -> float:
+    """
+    Computes Gromov's delta-hyperbolicity value from distance matrix using the maxmin product.
+
+    Parameters:
+    -----------
+    dismat : numpy.ndarray
+        A square distance matrix of shape (n, n), where n is the number of nodes in a dataset.
+
+    Returns:
+    --------
+    float
+        The delta hyperbolicity value.
+
+    Notes:
+    ------
+    This is a naive implementation that can be very inefficient on large datasets.
+    Use other mode for efficient implementation.
+    """
+
+    p = 0  # fixed point (hence the dataset should be shuffled for more reliable results)
+    row = dismat[p, :][np.newaxis, :]
+    col = dismat[:, p][:, np.newaxis]
+    XY_p = 0.5 * (row + col - dismat)
+
+    maxmin = np.max(np.minimum(XY_p[:, :, None], XY_p[None, :, :]), axis=1)
+    return np.max(maxmin - XY_p)
+
+
+@njit(parallel=True, fastmath=True)
+def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
+    """
+    Computes Gromov's delta-hyperbolicity value with the basic approach, proposed in the article
+    "On computing the Gromov hyperbolicity", 2015, by Nathann Cohen, David Coudert, Aurélien Lancin.
+
+    Parameters:
+    -----------
+    far_apart_pairs : numpy.ndarray
+        List of pairs of points, sorted by decrease of distance i.e. the most distant pair must be the first one.
+
+    adj_m: numpy.ndarry
+        Distance matrix.
+
+    Returns:
+    --------
+    float
+        The delta hyperbolicity value.
+    """
+    n_samples = adj_m.shape[0]
+    delta_hyp = 0.0
+    for i in prange(1, min(300000, len(far_apart_pairs))):
+        pair_1 = far_apart_pairs[i]
+        for j in prange(i):
+            pair_2 = far_apart_pairs[j]
+            i = pair_1[0]
+            j = pair_1[1]
+            v = pair_2[0]
+            w = pair_2[1]
+
+            d_ij = adj_m[i][j]
+            d_iw = adj_m[i][w]
+            d_iv = adj_m[i][v]
+
+            d_jw = adj_m[j][w]
+            d_jv = adj_m[j][v]
+
+            d_vw = adj_m[v][w]
+
+            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+            delta_hyp = max(delta_hyp, cur_del)
+
+    return delta_hyp
+
+
+@cuda.jit
+def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, results):
+    """
+    Computes Gromov's delta-hyperbolicity value with the basic approach, proposed in the article
+    "On computing the Gromov hyperbolicity", 2015, by Nathann Cohen, David Coudert, Aurélien Lancin.
+    Algorithm was rewritten for execution on GPU.
+
+    Parameters:
+    -----------
+    n: int
+        The number of pairs.
+
+    pairs_x_coord:
+        List of the fisrt points of the far away pairs pairs.
+
+
+    pairs_y_coord:
+        List of the second points of the far away pairs pairs.
+
+
+    adj_m: numpy.ndarry
+        Distance matrix.
+
+    x_coords_pairs
+    far_apart_pairs: numpy.ndarray
+        List of pairs of points, sorted by decrease of distance i.e. the most distant pair must be the first one.
+
+    adj_m: numpy.ndarry
+        Distance matrix.
+
+    results:
+        Array, where deltas for each pair will be stored.
+
+    """
+    n_samples = n
+    idx = cuda.grid(1)
+    if idx < n_samples:
+        i = fisrt_points[idx]
+        j = second_points[idx]
+
+        results[idx] = 0
+        delta_hyp = 0
+        for k in range(idx):
+            v = fisrt_points[k]
+            w = second_points[k]
+
+            d_ij = adj_m[i][j]
+            d_iw = adj_m[i][w]
+            d_iv = adj_m[i][v]
+
+            d_jw = adj_m[j][w]
+            d_jv = adj_m[j][v]
+
+            d_vw = adj_m[v][w]
+
+            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+            delta_hyp = max(delta_hyp, cur_del)
+        results[idx] = delta_hyp
 
 
 def delta_protes(dist_matrix):
@@ -336,17 +371,6 @@ def delta_execution(dist_matrix):
     return one_try_delta
 
 
-def time_func(func):
-    def res_func(*args, **kwargs):
-        time_start = timer()
-        res = func(*args, **kwargs)
-        time_finish = timer() - time_start
-        print(time_finish)
-        return res
-
-    return res_func
-
-
 def compare(
     delta_func_1, delta_func_2, precision: bool, way, economic, max_workers, **kwargs
 ):
@@ -377,8 +401,26 @@ def deltas_comparison(
     batch_size=400,
     seed=42,
     max_workers=25,
-    rank=10,
+    way="heuristic",
 ):
+    """
+    Function for comparing delta, clculated with some heuristic method and ground truth delta (calculated with basic approach).
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+      Item space matrix.
+    n_tries : int, optional
+        The number of times to compute the delta hyperbolicity using different subsets of nodes. Default is 10.
+    batch_size : int, optional
+        The number of nodes to process in each batch.
+    seed : int or None, optional
+        Seed used for the random generator in batch sampling. Default is 42.
+    max_workers : int or None, optional
+        The maximum number of workers to use. If None, the number will be set to the number of available CPUs. Default is None.
+    way : string
+        Mode for calculations.
+    """
     rel_delta_start = timer()
     deltas_diams = batched_delta_hyp(
         X,
@@ -387,9 +429,7 @@ def deltas_comparison(
         seed=seed,
         economic=True,
         max_workers=max_workers,
-        rank=rank,
-        way="old",
-        approach="old",
+        way=way,
     )
     rel_delta_time = timer() - rel_delta_start
 
@@ -404,31 +444,43 @@ def deltas_comparison(
         seed=seed,
         economic=False,
         max_workers=max_workers,
-        rank=rank,
-        way="old",
-        approach="old",
     )
     true_deltas = list(map(lambda x: x[0], true_delta))
     true_delta = np.mean(true_deltas)
 
     true_delta_time = timer() - true_delta_start
 
-    # tensor_delta_start = timer()
-    # tensor_delta = tensor_approximation()
-    # tensor_delta_time = timer() - tensor_delta_start
-
     print("---------------------------")
     print("true_delta " + str(true_delta))
     print("rel_delta " + str(rel_delta))
-    # print('tensor_delta ' + str(tensor_delta))
+
     print()
     print("true_delta time " + str(true_delta_time))
     print("rel_delta time " + str(rel_delta_time))
-    # print('tensor_delta time ' + str(tensor_delta_time))
+
     print("---------------------------")
 
 
 def tensor_approximation(d, b_s, func):
+    """
+    Function for comparing delta, using protes model of tensor approximation,
+    visit https://github.com/AndreiChertkov/teneva for more details.
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+      Item space matrix.
+    n_tries : int, optional
+        The number of times to compute the delta hyperbolicity using different subsets of nodes. Default is 10.
+    batch_size : int, optional
+        The number of nodes to process in each batch.
+    seed : int or None, optional
+        Seed used for the random generator in batch sampling. Default is 42.
+    max_workers : int or None, optional
+        The maximum number of workers to use. If None, the number will be set to the number of available CPUs. Default is None.
+    way : string
+        Mode for calculations.
+    """
     f_batch = lambda I: func(I)
     i_opt, y_opt = protes(
         f=f_batch,
@@ -455,14 +507,14 @@ def delta_hyp_condensed(dist_condensed: np.ndarray, n_samples: int) -> float:
     Parameters
     ----------
     dist_condensed : numpy.ndarray
-        A 1D array representing the condensed distance matrix of the network.
+        A 1D array representing the condensed distance matrix of the dataset.
     n_samples : int
-        The number of nodes in the network.
+        The number of nodes in the dataset.
 
     Returns
     -------
     float
-        The delta hyperbolicity of the network.
+        The delta hyperbolicity of the dataset.
 
     Notes
     -----
@@ -520,16 +572,38 @@ def delta_hyp_condensed(dist_condensed: np.ndarray, n_samples: int) -> float:
 
 @njit(parallel=True)
 def delta_hyp_condensed_rand_top(
-    dist: np.ndarray, n_samples, const, mode="rand"
+    dist: np.ndarray, n_samples, const, mode="top_k"
 ) -> float:
+    """
+    Compute the delta hyperbolicity value from the condensed distance matrix representation.
+    This is a modified version of the `delta_hyp_condenced` function.
+
+    Parameters
+    ----------
+    dist_condensed : numpy.ndarray
+        A 1D array representing the condensed distance matrix of the dataset.
+    n_samples : int
+        The number of nodes in the dataset.
+    const : int
+        Number of most distant points that are conciedered by the algo.
+    const : str
+        Mode offunction execution.
+
+    Returns
+    -------
+    float
+        The delta hyperbolicity of the dataset.
+
+    Notes
+    -----
+    The idea is that we can select points partly randomly to achieve a better covering of an item space.
+    """
     delta_hyp = np.zeros(n_samples, dtype=dist.dtype)
 
     for k in prange(n_samples):
         # as in `delta_hyp`, fixed point is selected at 0
         delta_hyp_k = 0.0
         dist_0k = dist[0][k - 1]
-
-        # сортим расстояния от k до остальных точек, индекс i будем выбирать из самых дальних
 
         if mode == "top_k":
             inds_i = np.argpartition(dist[k - 1], -const)
@@ -544,14 +618,10 @@ def delta_hyp_condensed_rand_top(
             )
         else:
             considered_i = np.random.choice(n_samples, const)
-        # брать 10 процентов от размера выборки ?
 
         for ind_i in considered_i:
             dist_0i = dist[0][ind_i]
             dist_ik = dist[ind_i][k - 1]
-            # dist_condensed[ind_i][k - 1] = 0.0
-
-            # сортим расстояния от i до остальных точек, индекс j будем выбирать из самых дальних
 
             if mode == "top_k":
                 inds_j = np.argpartition(dist[ind_i - 1], -const)
@@ -571,7 +641,6 @@ def delta_hyp_condensed_rand_top(
 
             for ind_j in considered_j:
                 cur_indxs = np.asarray([k, ind_i, ind_j])
-                # np.append(seen, cur_indxs)
                 dist_0j = dist[0][ind_j]
                 dist_jk = dist[ind_j][k - 1]
                 dist_ij = dist[ind_i][ind_j]
@@ -581,35 +650,35 @@ def delta_hyp_condensed_rand_top(
                 dist_array.remove(s1)
                 s2 = max(dist_array)
                 delta_hyp_k = max(delta_hyp_k, s1 - s2)
-                # else:
-                #     continue
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
 
 
 @njit(parallel=True)
-def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -> float:
+def delta_hyp_condensed_new(
+    dist_condensed: np.ndarray, n_samples: int, const: int
+) -> float:
     """
     Compute the delta hyperbolicity value from the condensed distance matrix representation.
-    This is a more efficient analog of the `delta_hyp` function.
+    This is a more efficient analog of the `delta_hyp_condensed` function.
 
     Parameters
     ----------
     dist_condensed : numpy.ndarray
-        A 1D array representing the condensed distance matrix of the network.
+        A 1D array representing the condensed distance matrix of the dataset.
     n_samples : int
-        The number of nodes in the network.
+        The number of nodes in the dataset.
+    const : int
+        Number of most distant points that are conciedered by the algo.
 
     Returns
     -------
     float
-        The delta hyperbolicity of the network.
+        The delta hyperbolicity of the dataset.
 
     Notes
     -----
-    Calculation heavily relies on the `scipy`'s `pdist` output format. According to the docs (as of v.1.10.1):
-    "The metric dist(u=X[i], v=X[j]) is computed and stored in entry m * i + j - ((i + 2) * (i + 1)) // 2."
-    Additionally, it implicitly assumes that j > i. Note that dist(u=X[0], v=X[k]) is defined by (k - 1)'s entry.
+    Heuristic version of delta_hyp_condenced function. Attemp to apply CCL main idea to the condenced implementation.
     """
     delta_hyp = np.zeros(n_samples, dtype=dist_condensed.dtype)
     seen = np.array([0, 0, 0])
@@ -619,29 +688,25 @@ def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -
         delta_hyp_k = 0.0
         dist_0k = dist_condensed[0][k - 1]
 
-        # сортим расстояния от k до остальных точек, индекс i будем выбирать из самых дальних
+        # sorting distances from k to all other points, index i will be chosen from the most distant ones
         inds_i = np.argpartition(dist_condensed[k - 1], n_samples - const)
         considered_i = inds_i[-const:]
-        # considered_i = considered_i[considered_i != k]
-
-        # брать 10 процентов от размера выборки ?
         for ind_i in considered_i:
             dist_0i = dist_condensed[0][ind_i]
             dist_ik = dist_condensed[ind_i][k - 1]
 
-            # сортим расстояния от i до остальных точек, индекс j будем выбирать из самых дальних
+            # sorting distances from i to all other points, index j will be chosen from the most distant ones
             inds_j = np.argpartition(dist_condensed[:, ind_i], n_samples - (const + 1))
             considered_j = inds_j[-const:]
 
             for ind_j in considered_j:
                 cur_indxs = np.asarray([k, ind_i, ind_j])
-                # if cur_indxs.all() not in seen:
                 np.append(seen, cur_indxs)
                 dist_0j = dist_condensed[0][ind_j]
                 dist_jk = dist_condensed[ind_j][k - 1]
                 dist_ij = dist_condensed[ind_i][ind_j]
 
-                # алгоритм с S
+                # algo with S
                 dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
                 s1 = max(dist_array)
                 dist_array.remove(s1)
@@ -649,15 +714,6 @@ def delta_hyp_condensed_new(dist_condensed: np.ndarray, n_samples: int, const) -
                 delta_hyp_k = max(delta_hyp_k, s1 - s2)
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
-
-
-def get_far_away_pairs_from_raw_arr(X):
-    pairs = []
-    n = X.shape[0]
-    m = X.shape[1]
-    for i in range(n):
-        for j in range(i, m):
-            value = euclidean(X[i, :], X[:, j])
 
 
 @jit(fastmath=True)
@@ -680,118 +736,39 @@ def s_delta(far_away_pairs, A, pid, x, y, h_lb):
     return np.max(delta_hyp)
 
 
-def delta_Nastyas(A, far_away_pairs, i_break=50000):
-    h_lb = 0
-    h_ub = np.inf
-
-    print(len(far_away_pairs))
-
-    # lbs = []
-    # ubs = []
-    for pid in range(1, min(i_break, len(far_away_pairs))):
-        p = far_away_pairs[pid]
-        x, y = p
-
-        dist = A[p]
-
-        # if dist < h_ub:
-        #     if h_ub <= h_lb:
-        #         print("here")
-        #         return h_lb / 2
-
-        #     h_ub = dist
-
-        # if dist <= h_lb:
-        #     print("break d < hlb")
-        #     return h_lb / 2
-
-        # lbs.append(h_lb)
-        # ubs.append(h_ub)
-
-        h_lb = max(h_lb, s_delta(far_away_pairs, A, pid, x, y, h_lb))
-
-        # if h_ub == h_lb:
-        #     break
-
-    # print("before leaving")
-    return h_lb / 2
-
-
-@njit
-def set_intersect(lst1, lst2):
-    return set(lst1).intersection(set(lst2))
-
-
-@njit
-def loop_intersection(lst1, lst2):
-    result = []
-    for element1 in lst1:
-        for element2 in lst2:
-            if element1 == element2:
-                result.append(element1)
-    return result
-
-
-# @profile
-@njit(parallel=True)
-def delta_hyp_condensed_article(dist_condensed: np.ndarray, k: int) -> float:
+def delta_CCL_heuristic(A, far_away_pairs, i_break=50000):
     """
-    Compute the delta hyperbolicity value from the condensed distance matrix representation.
-    This is a more efficient analog of the `delta_hyp` function.
+    Version of CCL algo with iterations budjet.
 
     Parameters
     ----------
     dist_condensed : numpy.ndarray
-        A 1D array representing the condensed distance matrix of the network.
+        A 1D array representing the condensed distance matrix of the dataset.
     n_samples : int
-        The number of nodes in the network.
+        The number of nodes in the dataset.
+    const : int
+        Number of most distant points that are conciedered by the algo.
+    i_break : int
+        Max allowed iterations.
 
     Returns
     -------
     float
-        The delta hyperbolicity of the network.
+        The delta hyperbolicity of the dataset.
 
     Notes
     -----
-    Calculation heavily relies on the `scipy`'s `pdist` output format. According to the docs (as of v.1.10.1):
-    "The metric dist(u=X[i], v=X[j]) is computed and stored in entry m * i + j - ((i + 2) * (i + 1)) // 2."
-    Additionally, it implicitly assumes that j > i. Note that dist(u=X[0], v=X[k]) is defined by (k - 1)'s entry.
+    Heuristic version of delta_hyp_condenced function. Attemp to apply CCL main idea to the condenced implementation.
     """
-    delta_hyp = 0
+    h_lb = 0
+    h_ub = np.inf
 
-    n_samples = dist_condensed.shape[0]
-    x = np.random.randint(1, n_samples)
-
-    indx_a = np.argmax(dist_condensed[x - 1])
-
-    indx_b = np.argmax(dist_condensed[indx_a])
-    dist_a_b = dist_condensed[indx_a][indx_b]
-
-    S_a = np.where(dist_condensed[indx_a] >= dist_a_b / 2)[0]
-    S_b = np.where(dist_condensed[indx_b] >= dist_a_b / 2)[0]
-    # print("S_a")
-    # print(S_a)
-
-    c_indxs = loop_intersection(typed.List(S_a), typed.List(S_b))[:k]
-    for i in prange(len(c_indxs)):
-        indx_c = c_indxs[i]
-        dist_a_c = dist_condensed[indx_a][indx_c]
-        dist_b_c = dist_condensed[indx_b][indx_c]
-        for indx_d in prange(n_samples):
-            # if indx_d != indx_a and indx_d != indx_b:
-            dist_a_d = dist_condensed[indx_a][indx_d]
-            dist_b_d = dist_condensed[indx_b][indx_d]
-            dist_c_d = dist_condensed[indx_c][indx_d]
-            dist_array = [
-                dist_a_b + dist_c_d,
-                dist_a_c + dist_b_d,
-                dist_a_d + dist_b_c,
-            ]
-            s1 = max(dist_array)
-            dist_array.remove(s1)
-            s2 = max(dist_array)
-            delta_hyp = max(delta_hyp, s1 - s2)
-    return 0.5 * delta_hyp
+    print(len(far_away_pairs))
+    for pid in range(1, min(i_break, len(far_away_pairs))):
+        p = far_away_pairs[pid]
+        x, y = p
+        h_lb = max(h_lb, s_delta(far_away_pairs, A, pid, x, y, h_lb))
+    return h_lb / 2
 
 
 def relative_delta_poincare(tol=1e-5):

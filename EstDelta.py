@@ -67,7 +67,8 @@ def build_csv(
 
     val_list_dict = default_vals
 
-    for i, datafile in enumerate(datafiles):
+    for _, datafile in enumerate(datafiles):
+        # reading dataset
         dataset_name = ""
         if datafile[-2:] == "gz":
             dataset_name = datafile[:-10]
@@ -76,15 +77,22 @@ def build_csv(
         if verbose:
             print(dataset_name)
         if dataset_name in ("ml-1m", "movieLens20m"):
-            cur_df = get_movielens_data("datasets/Zip/movieLens20m.zip")
-            # cur_df = get_movielens_data("C:\work\GitHub\DeltaEstimation\datasets\movieLens20m.zip")
-            matr_from_observ, u_id, i_id = matrix_from_observations(
+            full_path = os.path.join(datasets_dir, dataset_name)
+            if os.path.exists(full_path):
+                cur_df = get_movielens_data(full_path)
+            else:
+                download_path = (
+                    "http://files.grouplens.org/datasets/movielens/" + dataset_name
+                )
+                cur_df = get_movielens_data(download_path=download_path)
+            matr_from_observ, _, _ = matrix_from_observations(
                 cur_df, dtype=float, itemid="movieid"
             )
         else:
             cur_df = get_reviews(join(datasets_dir, datafile))
-            matr_from_observ, u_id, i_id = matrix_from_observations(cur_df, dtype=float)
-        for param in dependency:
+            matr_from_observ, _, _ = matrix_from_observations(cur_df, dtype=float)
+
+        for param in dependency:  # making grid of params
             val_list_dict[param] = make_list_params(
                 param,
                 matr_from_observ,
@@ -96,17 +104,18 @@ def build_csv(
                 max_batch=max_batch,
                 percents=percents,
             )
-        print(val_list_dict["Batch_size"])
-        print(val_list_dict["N_tries"])
-        print(val_list_dict["Rank"])
+        if verbose:
+            print(val_list_dict["Batch_size"])
+            print(val_list_dict["N_tries"])
+            print(val_list_dict["Rank"])
         max_rank = np.max(val_list_dict["Rank"])
-        for way in val_list_dict["Way"]:
-            # if way == "old":
+
+        for way in val_list_dict["Way"]:  # svd
             svd_time_start = timer()
             if (
                 f"{dataset_name}_S_matrix_{max_rank}.npy"
                 and f"{dataset_name}_V_matrix_{max_rank}.npy" in svds
-            ):
+            ):  # if there are saved matrices, taking them from directory, else executing svd and save the result
                 V = np.load(join(svd_dir, f"{dataset_name}_V_matrix_{max_rank}.npy"))
                 S = np.load(join(svd_dir, f"{dataset_name}_S_matrix_{max_rank}.npy"))
             else:
@@ -126,21 +135,17 @@ def build_csv(
                 print("done svd, time: " + str(svd_time))
             else:
                 svd_time = 0
-            for k, rank in enumerate(val_list_dict["Rank"]):
-                # if way == "old":
-                item_space = V.T[:, indices[:rank]] @ np.diag(new_S[:rank])
-                random_users = rng.choice(
-                    matr_from_observ.shape[0], rank, replace=False, shuffle=True
-                )
-                # item_space = matr_from_observ.toarray()
-                # print("itemspace " + str(item_space.size))
-                # else:
-                # item_space = matr_from_observ
-                for j, b_s in enumerate(val_list_dict["Batch_size"]):
+            for rank in val_list_dict["Rank"]:
+                item_space = V.T[:, indices[:rank]] @ np.diag(
+                    new_S[:rank]
+                )  # making item space from svd matrices
+
+                for b_s in val_list_dict["Batch_size"]:
                     for n_try in val_list_dict["N_tries"]:
                         if not compare:
                             delta_time_start = timer()
-                            print("delta start")
+                            if verbose:
+                                print("delta start")
                             deltas_diams = batched_delta_hyp(
                                 item_space,
                                 economic=True,
@@ -149,14 +154,13 @@ def build_csv(
                                 n_tries=n_try,
                                 seed=42,
                                 way=way,
-                            )
-
+                            )  # calling delta calculation function
                             delta_time = timer() - delta_time_start
 
                             deltas = list(map(lambda x: x[0], deltas_diams))
                             diams = list(map(lambda x: x[1], deltas_diams))
-
-                            print("cur_mean " + str(np.mean(deltas)))
+                            if verbose:
+                                print("cur_mean " + str(np.mean(deltas)))
                             for d_idx, delta in enumerate(deltas):
                                 add_data(
                                     path_to_csv,
@@ -184,6 +188,7 @@ def build_csv(
                                 seed=42,
                                 max_workers=25,
                                 rank=10,
+                                way=way,
                             )
                         if verbose:
                             print("done try " + str(n_try))
