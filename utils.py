@@ -12,6 +12,7 @@ import gzip
 import json
 
 from io import BytesIO
+from timeit import default_timer as timer
 
 
 def reindex(raw_data, index, filter_invalid=True, names=None):
@@ -98,6 +99,7 @@ def get_reviews(data_file):
 
 def get_movielens_data(
     local_file=None,
+    download_path=None,
     get_ratings=True,
     get_genres=False,
     split_genres=True,
@@ -112,7 +114,7 @@ def get_movielens_data(
         fields.append("timestamp")
     if not local_file:
         # downloading data
-        zip_file_url = "http://files.grouplens.org/datasets/movielens/ml-20m.zip"
+        zip_file_url = download_path
         with urllib.request.urlopen(zip_file_url) as zip_response:
             zip_contents = BytesIO(zip_response.read())
         print("downloaded")
@@ -188,9 +190,9 @@ def make_list_params(
     percents=True,
 ):
     """Builds lists of points, where estimations should be made."""
-    if not max_rank or max_rank > min(dataset_matrix.shape):
-        max_rank = min(dataset_matrix.shape)
-    if not min_rank or min_rank > min(dataset_matrix.shape):
+    if not max_rank or max_rank > max(dataset_matrix.shape):
+        max_rank = max(dataset_matrix.shape)
+    if not min_rank or min_rank > max(dataset_matrix.shape):
         min_rank = 2
 
     if not max_batch or max_batch > max(dataset_matrix.shape):
@@ -199,36 +201,21 @@ def make_list_params(
         min_batch = 2
 
     if var_name == "Rank":
-        # abs_min_rank = min(dataset_matrix.shape) * min_rank // 100
-        # abs_max_rank = min(dataset_matrix.shape) * max_rank // 100
         abs_min_rank = min_rank
         abs_max_rank = max_rank
         return np.linspace(abs_min_rank, abs_max_rank, num_vals_rank, dtype=int)
-        # return [32, 64, 128, 256, 512, 1024, 1536, 2048, 3072]
 
-        # return [1000]
     if var_name == "Batch_size":
         if percents:
             print(dataset_matrix.shape)
             abs_min_batch = dataset_matrix.shape[1] * min_batch // 100
             abs_max_batch = dataset_matrix.shape[1] * max_batch // 100
-            # abs_min_batch = min_batch
-            # abs_max_batch = max_batch
         else:
             abs_min_batch = min_batch
             abs_max_batch = max_batch
-            # print(int(math.log2(abs_max_batch)))
 
-        # return [
-        #     2**i
-        #     for i in range(
-        #         int(math.log2(abs_min_batch)),
-        #         int(np.round(math.log2(abs_max_batch))) + 1,
-        #         1,
-        #     )
-        # ]
         return np.linspace(abs_min_batch, abs_max_batch, num_vals_batch_size, dtype=int)
-        # return [3617, 7234, 10851, 14468, 18085]
+
     if var_name == "N_tries":
         return [25]
     if var_name == "Way":
@@ -242,3 +229,14 @@ def add_data(csv_path, dict_vals):
     with open(csv_path, "a", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(new_rows)
+
+
+def time_func(func):
+    def res_func(*args, **kwargs):
+        time_start = timer()
+        res = func(*args, **kwargs)
+        time_finish = timer() - time_start
+        print(time_finish)
+        return res
+
+    return res_func
