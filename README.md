@@ -20,6 +20,6 @@ grid_rank:            Num measurments on rank
 -c:                   Flag to note the mode, set -c for comparison of realisations
 
 ```
-Note that all essential directories (for datasets, csvs and svds) along with required dependencies should be set in the config file. See config.yml for an example.
+Note that all essential directories (for datasets, csvs and svds) along with required dependencies should be set in the config file. See delta_config.yml for an example.
 
 
