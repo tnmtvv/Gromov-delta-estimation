@@ -9,9 +9,9 @@ import yaml
 
 from sklearn.utils.extmath import randomized_svd
 
-from lib.src.dataprep import svd_decomp, dataset_preprcessing, resolve_dataset_name
-from lib.src.algo.delta import batched_delta_hyp
-from lib.src.algo.utils import deltas_comparison
+from lib.source.dataprep import svd_decomp, dataset_preprcessing, resolve_dataset_name
+from lib.source.algo.delta import batched_delta_hyp
+from lib.source.algo.utils import deltas_comparison
 
 import os
 
