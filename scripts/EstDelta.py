@@ -8,7 +8,7 @@ import pandas as pd
 import yaml
 import sys
 
-sys.path.append("C:/Users/tanya/GitHub/Gromov-delta-estimation")
+import libcontext
 
 
 from lib.source.dataprep.dataprep import (
