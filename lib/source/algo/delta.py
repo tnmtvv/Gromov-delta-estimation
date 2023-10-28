@@ -2,18 +2,25 @@ import numpy as np
 import sys
 import gc
 
-from sklearn.utils.extmath import randomized_svd
-from scipy.sparse import csr_matrix
-
+from timeit import default_timer as timer
 from sklearn.metrics import pairwise_distances
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
-from utils import get_far_away_pairs, cuda_prep
-import CCL
-import condenced
-import tensor
-import true_delta
+
+from lib.source.algo.algo_utils import get_far_away_pairs, cuda_prep
+from lib.source.algo.CCL import (
+    delta_CCL_heuristic,
+    delta_hyp_condensed_CCL,
+    delta_hyp_CCL_GPU,
+)
+from lib.source.algo.condenced import (
+    delta_hyp_condensed_rand_top,
+    delta_hyp_condensed_new,
+)
+from lib.source.algo.tensor import delta_protes, tensor_approximation
+
+from lib.source.algo.true_delta import delta_hyp
+
 
 from numba import typed
 
@@ -132,12 +139,10 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
         if way == "heuristic_CCL":
             print("pairs len " + str(len(far_away_pairs)))
             print("pairs size: " + str(sys.getsizeof(far_away_pairs)))
-            delta = CCL.delta_CCL_heuristic(
-                dist_matrix, typed.List(far_away_pairs), 100000
-            )
+            delta = delta_CCL_heuristic(dist_matrix, typed.List(far_away_pairs), 100000)
         elif way == "CCL":
             print("CCL")
-            delta = CCL.delta_hyp_condensed_CCL(typed.List(far_away_pairs), dist_matrix)
+            delta = delta_hyp_condensed_CCL(typed.List(far_away_pairs), dist_matrix)
         elif way == "GPU":
             (
                 n,
@@ -148,26 +153,92 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
                 blockspergrid,
                 threadsperblock,
             ) = cuda_prep(far_away_pairs, dist_matrix, 32)
-            CCL.delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
+            delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
                 n, x_coord_pairs, y_coord_pairs, adj_m, results
             )
         elif way == "rand_top":
             const = min(50, X.shape[0] - 1)
-            delta = condenced.delta_hyp_condensed_rand_top(
+            delta = delta_hyp_condensed_rand_top(
                 dist_matrix, X.shape[0], const, mode="top_rand"
             )
         elif way == "heuristic":
             const = min(50, X.shape[0] - 1)
-            delta = condenced.delta_hyp_condensed_new(
-                dist_matrix, X.shape[0], const, mode="top_rand"
+            delta = delta_hyp_condensed_new(
+                dist_matrix, X.shape[0], const, mode="top_k"
             )
         elif way == "tensor":
             # used_indices = []
-            objective_func = tensor.delta_protes(dist_matrix)
-            delta = tensor.tensor_approximation(
+            objective_func = delta_protes(dist_matrix)
+            delta = tensor_approximation(
                 d=3, b_s=dist_matrix.shape[0], func=objective_func
             )
     else:
-        delta = true_delta.delta_hyp(dist_matrix)
+        delta = delta_hyp(dist_matrix)
     delta_rel = 2 * delta / diam
     return delta_rel, diam
+
+
+def deltas_comparison(
+    X,
+    n_tries=10,
+    batch_size=400,
+    seed=42,
+    max_workers=25,
+    way="heuristic",
+):
+    """
+    Function for comparing delta, clculated with some heuristic method and ground truth delta (calculated with basic approach).
+
+    Parameters
+    ----------
+    X : numpy.ndarray
+      Item space matrix.
+    n_tries : int, optional
+        The number of times to compute the delta hyperbolicity using different subsets of nodes. Default is 10.
+    batch_size : int, optional
+        The number of nodes to process in each batch.
+    seed : int or None, optional
+        Seed used for the random generator in batch sampling. Default is 42.
+    max_workers : int or None, optional
+        The maximum number of workers to use. If None, the number will be set to the number of available CPUs. Default is None.
+    way : string
+        Mode for calculations.
+    """
+    rel_delta_start = timer()
+    deltas_diams = batched_delta_hyp(
+        X,
+        n_tries=n_tries,
+        batch_size=batch_size,
+        seed=seed,
+        economic=True,
+        max_workers=max_workers,
+        way=way,
+    )
+    rel_delta_time = timer() - rel_delta_start
+
+    rel_deltas = list(map(lambda x: x[0], deltas_diams))
+    rel_delta = np.mean(rel_deltas)
+
+    true_delta_start = timer()
+    true_delta = batched_delta_hyp(
+        X,
+        n_tries=n_tries,
+        batch_size=batch_size,
+        seed=seed,
+        economic=False,
+        max_workers=max_workers,
+    )
+    true_deltas = list(map(lambda x: x[0], true_delta))
+    true_delta = np.mean(true_deltas)
+
+    true_delta_time = timer() - true_delta_start
+
+    print("---------------------------")
+    print("true_delta " + str(true_delta))
+    print("rel_delta " + str(rel_delta))
+
+    print()
+    print("true_delta time " + str(true_delta_time))
+    print("rel_delta time " + str(rel_delta_time))
+
+    print("---------------------------")
