@@ -2,6 +2,7 @@ import numpy as np
 import sys
 import gc
 
+from numba import typed
 from timeit import default_timer as timer
 from sklearn.metrics import pairwise_distances
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,16 +14,10 @@ from lib.source.algo.CCL import (
     delta_hyp_condensed_CCL,
     delta_hyp_CCL_GPU,
 )
-from lib.source.algo.condenced import (
-    delta_hyp_condensed_rand_top,
-    delta_hyp_condensed_new,
-)
+from lib.source.algo.condenced import delta_hyp_condensed_heuristic, delta_hyp_condensed
 from lib.source.algo.tensor import delta_protes, tensor_approximation
 
 from lib.source.algo.true_delta import delta_hyp
-
-
-from numba import typed
 
 
 def batched_delta_hyp(
@@ -157,15 +152,17 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
                 n, x_coord_pairs, y_coord_pairs, adj_m, results
             )
         elif way == "rand_top":
-            const = min(50, X.shape[0] - 1)
-            delta = delta_hyp_condensed_rand_top(
-                dist_matrix, X.shape[0], const, mode="top_rand"
+            const = min(50, dist_matrix.shape[0] - 1)
+            delta = delta_hyp_condensed_heuristic(
+                dist_matrix, dist_matrix.shape[0], const, mode="top_rand"
             )
         elif way == "heuristic":
-            const = min(50, X.shape[0] - 1)
-            delta = delta_hyp_condensed_new(
-                dist_matrix, X.shape[0], const, mode="top_k"
+            const = min(50, dist_matrix.shape[0] - 1)
+            delta = delta_hyp_condensed_heuristic(
+                dist_matrix, dist_matrix.shape[0], const, mode="top_k"
             )
+        elif way == "condenced":
+            delta = delta_hyp_condensed(dist_matrix, dist_matrix.shape[0])
         elif way == "tensor":
             # used_indices = []
             objective_func = delta_protes(dist_matrix)

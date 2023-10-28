@@ -6,7 +6,7 @@ import numpy as np
 
 import os
 
-from utils import (
+from lib.source.dataprep.utils import (
     get_movielens_data,
     matrix_from_observations,
     get_reviews,

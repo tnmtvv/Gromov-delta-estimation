@@ -6,16 +6,22 @@ from timeit import default_timer as timer
 import numpy as np
 import pandas as pd
 import yaml
-from lib.source.dataprep import svd_decomp, dataset_preprcessing, resolve_dataset_name
+import sys
+
+sys.path.append("C:/Users/tanya/GitHub/Gromov-delta-estimation")
+
+
+from lib.source.dataprep.dataprep import (
+    svd_decomp,
+    dataset_preprcessing,
+    resolve_dataset_name,
+)
 from lib.source.algo.delta import batched_delta_hyp, deltas_comparison
 
 import os
 
 
-from lib.source.utils import (
-    get_movielens_data,
-    matrix_from_observations,
-    get_reviews,
+from lib.source.dataprep.utils import (
     make_list_params,
     add_data,
 )
@@ -65,6 +71,7 @@ def build_csv(
     df.to_csv(path_to_csv, index=False)
 
     val_list_dict = default_vals
+    print(val_list_dict)
 
     for _, datafile in enumerate(datafiles):
         dataset_name = resolve_dataset_name(datafile)
@@ -85,7 +92,8 @@ def build_csv(
         if verbose:
             print(val_list_dict["Batch_size"])
             print(val_list_dict["N_tries"])
-            print(val_list_dict["Rank"])
+            print("Rank " + str(val_list_dict["Rank"]))
+            print(val_list_dict["Way"])
         max_rank = np.max(val_list_dict["Rank"])
 
         for way in val_list_dict["Way"]:  # svd
