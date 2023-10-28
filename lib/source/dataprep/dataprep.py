@@ -41,7 +41,7 @@ def dataset_preprcessing(dataset_name, datafile, datasets_dir):
     return matr_from_observ
 
 
-def svd_decomp(dataset_name, max_rank, matr_from_observ, svds, svd_dir, verbose):
+def svd_decomp(dataset_name, max_rank, matr_from_observ, svds, svd_dir):
     if (
         f"{dataset_name}_S_matrix_{max_rank}.npy"
         and f"{dataset_name}_V_matrix_{max_rank}.npy" in svds

@@ -156,3 +156,65 @@ def delta_hyp_condensed(dist_condensed: np.ndarray, n_samples: int) -> float:
                 )
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
+
+
+@njit(parallel=True)
+def delta_hyp_condensed_new(
+    dist_condensed: np.ndarray, n_samples: int, const: int
+) -> float:
+    """
+    Compute the delta hyperbolicity value from the condensed distance matrix representation.
+    This is a more efficient analog of the `delta_hyp_condensed` function.
+
+    Parameters
+    ----------
+    dist_condensed : numpy.ndarray
+        A 1D array representing the condensed distance matrix of the dataset.
+    n_samples : int
+        The number of nodes in the dataset.
+    const : int
+        Number of most distant points that are conciedered by the algo.
+
+    Returns
+    -------
+    float
+        The delta hyperbolicity of the dataset.
+
+    Notes
+    -----
+    Heuristic version of delta_hyp_condenced function. Attemp to apply CCL main idea to the condenced implementation.
+    """
+    delta_hyp = np.zeros(n_samples, dtype=dist_condensed.dtype)
+    seen = np.array([0, 0, 0])
+
+    for k in prange(n_samples):
+        # as in `delta_hyp`, fixed point is selected at 0
+        delta_hyp_k = 0.0
+        dist_0k = dist_condensed[0][k - 1]
+
+        # sorting distances from k to all other points, index i will be chosen from the most distant ones
+        inds_i = np.argpartition(dist_condensed[k - 1], n_samples - const)
+        considered_i = inds_i[-const:]
+        for ind_i in considered_i:
+            dist_0i = dist_condensed[0][ind_i]
+            dist_ik = dist_condensed[ind_i][k - 1]
+
+            # sorting distances from i to all other points, index j will be chosen from the most distant ones
+            inds_j = np.argpartition(dist_condensed[:, ind_i], n_samples - (const + 1))
+            considered_j = inds_j[-const:]
+
+            for ind_j in considered_j:
+                cur_indxs = np.asarray([k, ind_i, ind_j])
+                np.append(seen, cur_indxs)
+                dist_0j = dist_condensed[0][ind_j]
+                dist_jk = dist_condensed[ind_j][k - 1]
+                dist_ij = dist_condensed[ind_i][ind_j]
+
+                # algo with S
+                dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
+                s1 = max(dist_array)
+                dist_array.remove(s1)
+                s2 = max(dist_array)
+                delta_hyp_k = max(delta_hyp_k, s1 - s2)
+        delta_hyp[k] = delta_hyp_k
+    return 0.5 * np.max(delta_hyp)

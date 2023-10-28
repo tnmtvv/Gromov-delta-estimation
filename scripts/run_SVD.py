@@ -8,7 +8,7 @@ import pandas as pd
 
 from timeit import default_timer as timer
 from sklearn.utils.extmath import randomized_svd
-from utils import get_movielens_data, matrix_from_observations, get_reviews
+from lib.source.utils import get_movielens_data, matrix_from_observations, get_reviews
 
 
 def main(datasets_dir, svd_path, csv_path, rank):

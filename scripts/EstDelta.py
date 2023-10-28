@@ -6,17 +6,13 @@ from timeit import default_timer as timer
 import numpy as np
 import pandas as pd
 import yaml
-
-from sklearn.utils.extmath import randomized_svd
-
 from lib.source.dataprep import svd_decomp, dataset_preprcessing, resolve_dataset_name
-from lib.source.algo.delta import batched_delta_hyp
-from lib.source.algo.utils import deltas_comparison
+from lib.source.algo.delta import batched_delta_hyp, deltas_comparison
 
 import os
 
 
-from utils import (
+from lib.source.utils import (
     get_movielens_data,
     matrix_from_observations,
     get_reviews,
