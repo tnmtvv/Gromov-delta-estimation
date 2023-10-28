@@ -193,12 +193,12 @@ def make_list_params(
     if not max_rank or max_rank > max(dataset_matrix.shape):
         max_rank = max(dataset_matrix.shape)
     if not min_rank or min_rank > max(dataset_matrix.shape):
-        min_rank = 2
+        min_rank = min(dataset_matrix.shape)
 
     if not max_batch or max_batch > max(dataset_matrix.shape):
         max_batch = max(dataset_matrix.shape)
     if not min_batch or min_batch > max(dataset_matrix.shape):
-        min_batch = 2
+        min_batch = min(dataset_matrix.shape)
 
     if var_name == "Rank":
         abs_min_rank = min_rank
@@ -219,7 +219,7 @@ def make_list_params(
     if var_name == "N_tries":
         return [25]
     if var_name == "Way":
-        return ["top_rand", "new"]
+        return ["top_rand", "CCL"]
 
 
 def add_data(csv_path, dict_vals):

@@ -1,4 +1,4 @@
-Dependencies: [['Batch_size', 'Rank', 'Way']]
+Dependencies: [['Batch_size', 'Rank']]
 
 Default_vals:
        'Rank': [3000]
@@ -6,6 +6,6 @@ Default_vals:
        'N_tries': [5]
        'Way': ['heuristic']
 
-Path_to_datasets: 'Path to datasets'
-Path_to_csvs: '\results\csvs'
-Path_to_svds: 'Path to file with svds'
+Path_to_datasets: 'G:\datasets\Small'
+Path_to_csvs: 'C:\Users\tanya\GitHub\Gromov-delta-estimation\results\csvs'
+Path_to_svds: 'D:\DeltaEstimation\DeltaEstimation\SVD'
