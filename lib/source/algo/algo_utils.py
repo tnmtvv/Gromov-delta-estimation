@@ -1,5 +1,5 @@
 import numpy as np
-from numba import jit, cuda
+from numba import jit, cuda, njit, prange
 
 
 @jit(fastmath=True)
@@ -32,6 +32,36 @@ def cuda_prep(far_away_pairs, dist_matrix, block_size):
         blockspergrid,
         threadsperblock,
     )
+
+
+@njit(parallel=True)
+def s_delta_parallel(far_away_pairs, A, pid, x, y, h_lb):
+    delta_hyp = np.zeros(pid, dtype=A.dtype)
+    for inx in prange(pid):
+        v = far_away_pairs[inx][0]
+        w = far_away_pairs[inx][1]
+
+        S1 = A[x, y] + A[v, w]
+        S2 = A[x, v] + A[y, w]
+        S3 = A[x, w] + A[y, v]
+        delta_hyp[inx] = S1 - max(S2, S3)
+    return np.max(delta_hyp)
+
+
+def s_delta(dist, ind_i, ind_j, k):
+    dist_0k = dist[0][k - 1]
+
+    dist_0i = dist[0][ind_i]
+    dist_ik = dist[ind_i][k - 1]
+
+    dist_0j = dist[0][ind_j]
+    dist_jk = dist[ind_j][k - 1]
+    dist_ij = dist[ind_i][ind_j]
+
+    dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
+    s1, s2 = sorted(dist_array)[-2:]
+    delta_hyp_k = max(delta_hyp_k, s1 - s2)
+    return delta_hyp_k
 
 
 def relative_delta_poincare(tol=1e-5):

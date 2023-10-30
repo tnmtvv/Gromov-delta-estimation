@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit, prange
+from algo_utils import s_delta
 
 
 @njit(parallel=True)
@@ -17,9 +18,9 @@ def delta_hyp_condensed_heuristic(
     n_samples : int
         The number of nodes in the dataset.
     const : int
-        Number of most distant points that are conciedered by the algo.
+        Number of most distant points that are considered by the algo.
     const : str
-        Mode offunction execution.
+        Mode of function execution.
 
     Returns
     -------
@@ -35,8 +36,6 @@ def delta_hyp_condensed_heuristic(
     for k in prange(n_samples):
         # as in `delta_hyp`, fixed point is selected at 0
         delta_hyp_k = 0.0
-        dist_0k = dist[0][k - 1]
-
         if mode == "top_k":
             inds_i = np.argpartition(dist[k - 1], -const)
             considered_i = inds_i[-const:]
@@ -52,9 +51,6 @@ def delta_hyp_condensed_heuristic(
             considered_i = np.random.choice(n_samples, const)
 
         for ind_i in considered_i:
-            dist_0i = dist[0][ind_i]
-            dist_ik = dist[ind_i][k - 1]
-
             if mode == "top_k":
                 inds_j = np.argpartition(dist[ind_i - 1], -const)
                 considered_j = inds_j[-const:]
@@ -72,16 +68,7 @@ def delta_hyp_condensed_heuristic(
                 considered_j = np.random.choice(n_samples, const)
 
             for ind_j in considered_j:
-                cur_indxs = np.asarray([k, ind_i, ind_j])
-                dist_0j = dist[0][ind_j]
-                dist_jk = dist[ind_j][k - 1]
-                dist_ij = dist[ind_i][ind_j]
-
-                dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
-                s1 = max(dist_array)
-                dist_array.remove(s1)
-                s2 = max(dist_array)
-                delta_hyp_k = max(delta_hyp_k, s1 - s2)
+                delta_hyp_k = s_delta(dist, ind_i, ind_j, k)
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
 
