@@ -10,23 +10,23 @@ def delta_execution(dist_matrix):
         # Parameters
         # ----------
         # i : int
-        #   Index of first point to concieder.
+        #   Index of first point to consider.
 
         # j : int
-        #   Index of second point to concieder.
+        #   Index of second point to consider.
 
         # k : int
-        #   Index of third point to concieder.
+        #   Index of third point to consider.
 
         Returns
         ----------
         delta : int
-          A delta value for points of passed indices. Should be maximaized.
+          A delta value for points of passed indices. Should be maximized.
 
         Notes
         ----------
         Function calculates semi-difference of the first and second maximums (m_1 and m_2) of the distances sums,
-        whith declared to be an eqvivalent deffinition of Gromov`s delta according to the article https://inria.hal.science/hal-01199860/document.
+        which is declared to be an equivalent definition of Gromov`s delta according to the article https://inria.hal.science/hal-01199860/document.
 
         """
         sum_1 = dist_matrix[i][j] + dist_matrix[0][k]
@@ -34,9 +34,7 @@ def delta_execution(dist_matrix):
         sum_3 = dist_matrix[j][k] + dist_matrix[0][i]
 
         dist_array = [sum_1, sum_2, sum_3]
-        m_1 = max(dist_array)
-        dist_array.remove(m_1)
-        m_2 = max(dist_array)
+        m_1, m_2 = sorted(dist_array)[-2:]
 
         delta = (m_1 - m_2) / 2
         return delta

@@ -184,7 +184,7 @@ def deltas_comparison(
     way="heuristic",
 ):
     """
-    Function for comparing delta, clculated with some heuristic method and ground truth delta (calculated with basic approach).
+    Function for comparing delta, calculated with some heuristic method and ground truth delta (calculated with basic approach).
 
     Parameters
     ----------

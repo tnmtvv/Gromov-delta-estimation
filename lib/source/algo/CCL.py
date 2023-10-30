@@ -1,5 +1,6 @@
 from numba import njit, prange, cuda
 import numpy as np
+from algo_utils import s_delta_parallel
 
 
 @njit(parallel=True, fastmath=True)
@@ -107,20 +108,6 @@ def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, results):
         results[idx] = delta_hyp
 
 
-@njit(parallel=True)
-def s_delta(far_away_pairs, A, pid, x, y, h_lb):
-    delta_hyp = np.zeros(pid, dtype=A.dtype)
-    for inx in prange(pid):
-        v = far_away_pairs[inx][0]
-        w = far_away_pairs[inx][1]
-
-        S1 = A[x, y] + A[v, w]
-        S2 = A[x, v] + A[y, w]
-        S3 = A[x, w] + A[y, v]
-        delta_hyp[inx] = S1 - max(S2, S3)
-    return np.max(delta_hyp)
-
-
 def delta_CCL_heuristic(A, far_away_pairs, i_break=50000):
     """
     Version of CCL algo with iterations budjet.
@@ -152,5 +139,5 @@ def delta_CCL_heuristic(A, far_away_pairs, i_break=50000):
     for pid in range(1, min(i_break, len(far_away_pairs))):
         p = far_away_pairs[pid]
         x, y = p
-        h_lb = max(h_lb, s_delta(far_away_pairs, A, pid, x, y, h_lb))
+        h_lb = max(h_lb, s_delta_parallel(far_away_pairs, A, pid, x, y, h_lb))
     return h_lb / 2
