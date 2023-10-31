@@ -3,9 +3,8 @@ A project provides various functions for calculating Gromov delta-hyperbolicity 
 Current implementation works with [Amazon](https://jmcauley.ucsd.edu/data/amazon/) and [MovieLens](http://files.grouplens.org/datasets/movielens/) datasets.
 
 ## Repo structure
-All variations of algos for calculating delta are located in `lib/source/algo` folder.
-`notebooks` folder contains useful jupiter notebooks for visualizing statistics and charting.
-`scripts` for running current configuration are in scripts folder.
+All variations of algos for calculating delta are located in [`lib/source/algo`](./lib/source/algo) folder.<br>
+[`notebooks`](./notebooks/) folder contains useful jupiter notebooks for visualizing statistics and charting.<br>[`scripts`](./scripts/) for running current configuration are in scripts folder.
 
 ## Positional arguments
 ```python
