@@ -2,6 +2,8 @@ import numpy as np
 import sys
 import gc
 
+# import libcontext
+
 from numba import typed
 from timeit import default_timer as timer
 from sklearn.metrics import pairwise_distances
@@ -14,7 +16,10 @@ from lib.source.algo.CCL import (
     delta_hyp_condensed_CCL,
     delta_hyp_CCL_GPU,
 )
-from lib.source.algo.condenced import delta_hyp_condensed_heuristic, delta_hyp_condensed
+from lib.source.algo.condenced import (
+    delta_hyp_condensed_heuristic,
+    delta_hyp_condensed,
+)
 from lib.source.algo.tensor import delta_protes, tensor_approximation
 
 from lib.source.algo.true_delta import delta_hyp
@@ -99,7 +104,6 @@ def batched_delta_hyp(
     return results
 
 
-# @profile
 def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     """
     Computes relative delta hyperbolicity value and diameter from coordinates matrix.
@@ -122,10 +126,6 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     """
 
     dist_matrix = pairwise_distances(X, metric="euclidean")
-    del X
-    gc.collect()
-    print("matrix size: " + str(sys.getsizeof(dist_matrix)))
-
     diam = np.max(dist_matrix)
 
     if economic:

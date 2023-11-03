@@ -159,3 +159,4 @@ cython_debug/
 #.idea/
 
 delta_config.yml
+draft_scripts/

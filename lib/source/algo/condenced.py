@@ -1,6 +1,6 @@
 import numpy as np
 from numba import njit, prange
-from algo_utils import s_delta
+from lib.source.algo.algo_utils import s_delta
 
 
 @njit(parallel=True)
@@ -34,9 +34,9 @@ def delta_hyp_condensed_heuristic(
     The idea is that we can select points partly randomly to achieve a better covering of an item space.
     """
     delta_hyp = np.zeros(n_samples, dtype=dist.dtype)
-    rng = np.random.default_rng(seed)
+    # rng = np.random.default_rng(seed)
 
-    for k in prange(n_samples):
+    for k in range(n_samples):
         # as in `delta_hyp`, fixed point is selected at 0
         delta_hyp_k = 0.0
         if mode == "top_k":
@@ -46,12 +46,12 @@ def delta_hyp_condensed_heuristic(
             inds = np.argpartition(dist[k - 1], -const // 2)
             considered_i_top_part = inds[-const // 2 :]
 
-            considered_i_rand_part = rng.choice(inds[: -const // 2], const // 2)
+            considered_i_rand_part = np.random.choice(inds[: -const // 2], const // 2)
             considered_i = np.concatenate(
                 (considered_i_top_part, considered_i_rand_part)
             )
         else:
-            considered_i = rng.choice(n_samples, const)
+            considered_i = np.random.choice(n_samples, const)
 
         for ind_i in considered_i:
             if mode == "top_k":
@@ -61,15 +61,17 @@ def delta_hyp_condensed_heuristic(
                 inds = np.argpartition(dist[ind_i - 1], -const // 2)
                 considered_j_top_part = inds[-const // 2 :]
 
-                considered_j_rand_part = rng.choice(inds[: -const // 2], const // 2)
+                considered_j_rand_part = np.random.choice(
+                    inds[: -const // 2], const // 2
+                )
                 considered_j = np.concatenate(
                     (considered_j_top_part, considered_j_rand_part)
                 )
             else:
-                considered_j = rng.choice(n_samples, const)
+                considered_j = np.random.choice(n_samples, const)
 
             for ind_j in considered_j:
-                delta_hyp_k = s_delta(dist, ind_i, ind_j, k)
+                delta_hyp_k = s_delta(dist, ind_i, ind_j, k, delta_hyp_k)
         delta_hyp[k] = delta_hyp_k
     return 0.5 * np.max(delta_hyp)
 
