@@ -1,5 +1,6 @@
 import numpy as np
 from numba import jit, cuda, njit, prange
+import time
 
 
 @jit(fastmath=True)
@@ -48,9 +49,9 @@ def s_delta_parallel(far_away_pairs, A, pid, x, y, h_lb):
     return np.max(delta_hyp)
 
 
-def s_delta(dist, ind_i, ind_j, k):
+@njit
+def s_delta(dist, ind_i, ind_j, k, delta_hyp_k):
     dist_0k = dist[0][k - 1]
-
     dist_0i = dist[0][ind_i]
     dist_ik = dist[ind_i][k - 1]
 
@@ -58,10 +59,11 @@ def s_delta(dist, ind_i, ind_j, k):
     dist_jk = dist[ind_j][k - 1]
     dist_ij = dist[ind_i][ind_j]
 
+    # algo with S
     dist_array = [dist_0j + dist_ik, dist_0i + dist_jk, dist_0k + dist_ij]
-    s1, s2 = sorted(dist_array)[-2:]
+    s2, s1 = sorted(dist_array)[-2:]
     delta_hyp_k = max(delta_hyp_k, s1 - s2)
-    return delta_hyp_k
+    return max(delta_hyp_k, s1 - s2)
 
 
 def relative_delta_poincare(tol=1e-5):
