@@ -5,7 +5,7 @@ from lib.source.algo.algo_utils import s_delta
 
 @njit(parallel=True)
 def delta_hyp_condensed_heuristic(
-    dist: np.ndarray, n_samples, const, seed=42, mode="top_k"
+    dist: np.ndarray, n_samples, const, mode="top_k"
 ) -> float:
     """
     Compute the delta hyperbolicity value from the condensed distance matrix representation.

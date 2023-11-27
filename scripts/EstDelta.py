@@ -20,6 +20,8 @@ from lib.source.algo.delta import batched_delta_hyp, deltas_comparison
 
 import os
 
+# from memory_profiler import profile
+
 
 from lib.source.dataprep.utils import (
     make_list_params,
@@ -27,6 +29,7 @@ from lib.source.dataprep.utils import (
 )
 
 
+# @profile
 def build_csv(
     datasets_dir,
     csv_dir,
@@ -121,7 +124,7 @@ def build_csv(
                             deltas_diams = batched_delta_hyp(
                                 item_space,
                                 economic=True,
-                                max_workers=50,
+                                max_workers=5,
                                 batch_size=b_s,
                                 n_tries=n_try,
                                 seed=42,

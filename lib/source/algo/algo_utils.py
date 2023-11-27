@@ -1,9 +1,9 @@
 import numpy as np
 from numba import jit, cuda, njit, prange
 import time
+import math
 
 
-@jit(fastmath=True)
 def get_far_away_pairs(A, N):
     a = zip(*np.unravel_index(np.argsort(-A.ravel())[:N], A.shape))
     return [(i, j) for (i, j) in a if i < j]
@@ -17,7 +17,8 @@ def cuda_prep(far_away_pairs, dist_matrix, block_size):
     x_coord_pairs = cuda.to_device(x_coords)
     y_coord_pairs = cuda.to_device(y_coords)
     adj_m = cuda.to_device(dist_matrix)
-    results = cuda.to_device(list(np.zeros(len(x_coord_pairs))))
+    # results = cuda.to_device(list(np.zeros(len(x_coord_pairs))))
+    delta_res = cuda.to_device(list(np.zeros(1)))
     n = len(x_coord_pairs)
 
     threadsperblock = (block_size, block_size)
@@ -29,10 +30,20 @@ def cuda_prep(far_away_pairs, dist_matrix, block_size):
         x_coord_pairs,
         y_coord_pairs,
         adj_m,
-        results,
+        # results,
         blockspergrid,
         threadsperblock,
+        delta_res,
     )
+
+
+def calc_max_workers(batch_size, mem_bound, n_tries):
+    matrix_size_gb = (batch_size * batch_size * 8) / math.pow(10, 9)
+    max_workers_theory = int(mem_bound // (matrix_size_gb * 2))
+    if max_workers_theory > n_tries:
+        return n_tries
+    else:  # think about the situation, where the matrix size itself is bigger than memory bound (max_workers_thery < 1)
+        return max(1, max_workers_theory)
 
 
 @njit(parallel=True)
