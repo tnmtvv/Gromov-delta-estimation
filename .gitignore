@@ -159,4 +159,9 @@ cython_debug/
 #.idea/
 
 delta_config.yml
+server_config.yml
 draft_scripts/
+results/
+*.csv
+*.dat
+*.txt

@@ -4,13 +4,13 @@ import gc
 
 # import libcontext
 
-from numba import typed
+from numba import typed, get_num_threads, cuda, njit, prange
 from timeit import default_timer as timer
 from sklearn.metrics import pairwise_distances
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
-from lib.source.algo.algo_utils import get_far_away_pairs, cuda_prep
+from lib.source.algo.algo_utils import get_far_away_pairs, cuda_prep, calc_max_workers
 from lib.source.algo.CCL import (
     delta_CCL_heuristic,
     delta_hyp_condensed_CCL,
@@ -24,7 +24,12 @@ from lib.source.algo.tensor import delta_protes, tensor_approximation
 
 from lib.source.algo.true_delta import delta_hyp
 
+# from memory_profiler import profile
+# from dist_matrix.cuda_dist_matrix_full import dist_matrix as gpu_dist_matrix
+# from cupyx.scipy.spatial import distance_matrix
 
+
+# @profile
 def batched_delta_hyp(
     X,
     n_tries=10,
@@ -32,6 +37,7 @@ def batched_delta_hyp(
     seed=42,
     economic=True,
     max_workers=25,
+    mem_bound=150,
     way="heuristic",
 ):
     """
@@ -70,40 +76,79 @@ def batched_delta_hyp(
     """
     print("true X shape" + str(X.shape))
     n_objects, _ = X.shape  # number of items
-
     results = []
+    # if way != "GPU":
     rng = np.random.default_rng(seed)
-    max_workers = max_workers or cpu_count() - 1
-    t = 0
-    mult_t = 0
-    with ThreadPoolExecutor(max_workers=min(n_tries, max_workers)) as executor:
-        futures = []
-        for _ in range(n_tries):
-            if batch_size >= n_objects:
-                print("batch_size >= n_objects")
-                print(batch_size)
-                print(n_objects)
-                # `delta_hyp` selects a fixed point w.r.t which delta is computed
-                # the fixed point always corresponds to the first object, so shuffling allows
-                # exploring different initialization of a fixed point
-                batch_idx = rng.permutation(n_objects)
-            else:
-                batch_idx = rng.choice(
-                    n_objects, batch_size, replace=False, shuffle=True
-                )
-            item_space = X[batch_idx]
-            print("batch done")
-            future = executor.submit(
-                delta_hyp_rel, item_space, economic=economic, way=way
-            )
-            futures.append(future)
-        for i, future in enumerate(as_completed(futures)):
-            delta_rel, diam = res = future.result()
-            print("res: " + str(res))
-            results.append(res)
+    max_workers = min(max_workers, calc_max_workers(batch_size, mem_bound, n_tries))
+    print("succsess")
+    print("available num of theads " + str(max_workers))
+    for part in range(int(n_tries // max_workers) + 1):
+        if max_workers * part >= n_tries:
+            break
+        else:
+            with ThreadPoolExecutor(
+                max_workers=min(n_tries - max_workers * part, max_workers)
+            ) as executor:
+                futures = []
+                for _ in range(executor._max_workers):
+                    if batch_size >= n_objects:
+                        print("batch_size >= n_objects")
+                        print(batch_size)
+                        print(n_objects)
+                        # `delta_hyp` selects a fixed point w.r.t which delta is computed
+                        # the fixed point always corresponds to the first object, so shuffling allows
+                        # exploring different initialization of a fixed point
+                        batch_idx = rng.permutation(n_objects)
+                    else:
+                        batch_idx = rng.choice(
+                            n_objects, batch_size, replace=False, shuffle=True
+                        )
+                    item_space = X[batch_idx]
+                    print("batch done")
+                    future = executor.submit(
+                        delta_hyp_rel, item_space, economic=economic, way=way
+                    )
+                    futures.append(future)
+                for i, future in enumerate(as_completed(futures)):
+                    delta_rel, diam = res = future.result()
+                    print("res: " + str(res))
+                    results.append(res)
+    # else:
+    #     far_away_pairs = []
+    #     dist_matrices = []
+    #     for _ in range(n_tries):
+    #         dist_matrix = pairwise_distances(X, metric="euclidean")
+    #         dist_matrices.append(dist_matrix)
+    #         far_away_pairs.append(
+    #             get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+    #         )
+    #     results = delta_hyp_GPU(n_tries, far_away_pairs, dist_matrices)
     return results
 
 
+@njit(parallel=True)
+def delta_hyp_GPU(n_tries, far_away_pairs_array, dist_matrices):
+    answ = np.zeros(n_tries, dtype=dist_matrices[0].dtype)
+    for i in prange(n_tries):
+        (
+            n,
+            x_coord_pairs,
+            y_coord_pairs,
+            adj_m,
+            results,
+            blockspergrid,
+            threadsperblock,
+        ) = cuda_prep(far_away_pairs_array[i], dist_matrices[i], 32)
+        print("pairs len " + str(len(far_away_pairs_array[i])))
+        delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
+            n, x_coord_pairs, y_coord_pairs, adj_m, results
+        )
+        delta = max(results)
+        answ[i] = (delta, np.max(dist_matrices))
+    return answ
+
+
+# @profile
 def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     """
     Computes relative delta hyperbolicity value and diameter from coordinates matrix.
@@ -127,6 +172,7 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
 
     dist_matrix = pairwise_distances(X, metric="euclidean")
     diam = np.max(dist_matrix)
+    print(dist_matrix.shape)
 
     if economic:
         if way in ["heuristic_CCL", "CCL", "GPU"]:
@@ -144,13 +190,16 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
                 x_coord_pairs,
                 y_coord_pairs,
                 adj_m,
-                results,
                 blockspergrid,
                 threadsperblock,
+                delta_res,
             ) = cuda_prep(far_away_pairs, dist_matrix, 32)
+            print("pairs len " + str(len(far_away_pairs)))
             delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
-                n, x_coord_pairs, y_coord_pairs, adj_m, results
+                n, x_coord_pairs, y_coord_pairs, adj_m, delta_res
             )
+            delta = delta_res[0]
+            # delta = np.max(results)
         elif way == "rand_top":
             const = min(50, dist_matrix.shape[0] - 1)
             delta = delta_hyp_condensed_heuristic(

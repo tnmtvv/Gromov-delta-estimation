@@ -24,10 +24,10 @@ def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
     """
     n_samples = adj_m.shape[0]
     delta_hyp = 0.0
-    for i in prange(1, min(300000, len(far_apart_pairs))):
-        pair_1 = far_apart_pairs[i]
-        for j in prange(i):
-            pair_2 = far_apart_pairs[j]
+    for iter_1 in prange(1, min(300000, len(far_apart_pairs))):
+        pair_1 = far_apart_pairs[iter_1]
+        for iter_2 in prange(iter_1):
+            pair_2 = far_apart_pairs[iter_2]
             i = pair_1[0]
             j = pair_1[1]
             v = pair_2[0]
@@ -49,7 +49,7 @@ def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
 
 
 @cuda.jit
-def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, results):
+def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, delta_res):
     """
     Computes Gromov's delta-hyperbolicity value with the basic approach, proposed in the article
     "On computing the Gromov hyperbolicity", 2015, by Nathann Cohen, David Coudert, Aurélien Lancin.
@@ -83,16 +83,15 @@ def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, results):
 
     """
     n_samples = n
-    idx = cuda.grid(1)
-    if idx < n_samples:
-        i = fisrt_points[idx]
-        j = second_points[idx]
+    row, col = cuda.grid(2)
+    cur_max = 0.0
 
-        results[idx] = 0
-        delta_hyp = 0
-        for k in range(idx):
-            v = fisrt_points[k]
-            w = second_points[k]
+    if row < n_samples:
+        i = fisrt_points[row]
+        j = second_points[row]
+        if col < row:
+            v = fisrt_points[col]
+            w = second_points[col]
 
             d_ij = adj_m[i][j]
             d_iw = adj_m[i][w]
@@ -103,9 +102,12 @@ def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, results):
 
             d_vw = adj_m[v][w]
 
-            cur_del = (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
-            delta_hyp = max(delta_hyp, cur_del)
-        results[idx] = delta_hyp
+            # results[row] = max(
+            #     results[row], (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+            # )
+            cuda.atomic.max(
+                delta_res, (0), (d_ij + d_vw - max(d_iv + d_jw, d_iw + d_jv)) / 2
+            )
 
 
 def delta_CCL_heuristic(A, far_away_pairs, i_break=50000):
