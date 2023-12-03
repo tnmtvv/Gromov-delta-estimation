@@ -77,7 +77,7 @@ def batched_delta_hyp(
     print("true X shape" + str(X.shape))
     n_objects, _ = X.shape  # number of items
     results = []
-    # if way != "GPU":
+    x = cuda.device_array(1)  # resolving strange numba error
     rng = np.random.default_rng(seed)
     max_workers = min(max_workers, calc_max_workers(batch_size, mem_bound, n_tries))
     print("succsess")

@@ -23,7 +23,7 @@ def resolve_dataset_name(datafile):
 
 
 def dataset_preprcessing(dataset_name, datafile, datasets_dir):
-    if dataset_name in ("ml-1m", "movieLens20m"):
+    if dataset_name in ("ml-1m", "movieLens20m", "ml-20m"):
         full_path = os.path.join(datasets_dir, dataset_name)
         if os.path.exists(full_path):
             cur_df = get_movielens_data(full_path)
