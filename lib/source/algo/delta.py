@@ -7,8 +7,12 @@ import gc
 from numba import typed, get_num_threads, cuda, njit, prange
 from timeit import default_timer as timer
 from sklearn.metrics import pairwise_distances
+
+from scipy.spatial.distance import pdist
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
+
+# from line_profiler import profile
 
 from lib.source.algo.algo_utils import get_far_away_pairs, cuda_prep, calc_max_workers
 from lib.source.algo.CCL import (
@@ -37,7 +41,7 @@ def batched_delta_hyp(
     seed=42,
     economic=True,
     max_workers=25,
-    mem_bound=150,
+    mem_bound=100,
     way="heuristic",
 ):
     """
@@ -126,26 +130,24 @@ def batched_delta_hyp(
     return results
 
 
-@njit(parallel=True)
-def delta_hyp_GPU(n_tries, far_away_pairs_array, dist_matrices):
-    answ = np.zeros(n_tries, dtype=dist_matrices[0].dtype)
-    for i in prange(n_tries):
-        (
-            n,
-            x_coord_pairs,
-            y_coord_pairs,
-            adj_m,
-            results,
-            blockspergrid,
-            threadsperblock,
-        ) = cuda_prep(far_away_pairs_array[i], dist_matrices[i], 32)
-        print("pairs len " + str(len(far_away_pairs_array[i])))
-        delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
-            n, x_coord_pairs, y_coord_pairs, adj_m, results
-        )
-        delta = max(results)
-        answ[i] = (delta, np.max(dist_matrices))
-    return answ
+def delta_hyp_GPU(
+    far_away_pairs,
+    dist_matrix,
+):
+    (
+        n,
+        x_coord_pairs,
+        y_coord_pairs,
+        adj_m,
+        blockspergrid,
+        threadsperblock,
+        delta_res,
+    ) = cuda_prep(far_away_pairs, dist_matrix, 32)
+    print("pairs len " + str(len(far_away_pairs)))
+    delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
+        n, x_coord_pairs, y_coord_pairs, adj_m, delta_res
+    )
+    return delta_res[0]
 
 
 # @profile
@@ -170,9 +172,11 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
 
     """
 
-    dist_matrix = pairwise_distances(X, metric="euclidean")
+    if way != "condenced":
+        dist_matrix = pairwise_distances(X, metric="euclidean")
+    else:
+        dist_matrix = pdist(X)
     diam = np.max(dist_matrix)
-    print(dist_matrix.shape)
 
     if economic:
         if way in ["heuristic_CCL", "CCL", "GPU"]:
@@ -185,20 +189,7 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             print("CCL")
             delta = delta_hyp_condensed_CCL(typed.List(far_away_pairs), dist_matrix)
         elif way == "GPU":
-            (
-                n,
-                x_coord_pairs,
-                y_coord_pairs,
-                adj_m,
-                blockspergrid,
-                threadsperblock,
-                delta_res,
-            ) = cuda_prep(far_away_pairs, dist_matrix, 32)
-            print("pairs len " + str(len(far_away_pairs)))
-            delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
-                n, x_coord_pairs, y_coord_pairs, adj_m, delta_res
-            )
-            delta = delta_res[0]
+            delta = delta_hyp_GPU(far_away_pairs, dist_matrix)
             # delta = np.max(results)
         elif way == "rand_top":
             const = min(50, dist_matrix.shape[0] - 1)
@@ -211,7 +202,7 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
                 dist_matrix, dist_matrix.shape[0], const, mode="top_k"
             )
         elif way == "condenced":
-            delta = delta_hyp_condensed(dist_matrix, dist_matrix.shape[0])
+            delta = delta_hyp_condensed(dist_matrix, X.shape[0])
         elif way == "tensor":
             # used_indices = []
             objective_func = delta_protes(dist_matrix)
