@@ -36,7 +36,7 @@ def delta_hyp_condensed_heuristic(
     delta_hyp = np.zeros(n_samples, dtype=dist.dtype)
     # rng = np.random.default_rng(seed)
 
-    for k in range(n_samples):
+    for k in prange(n_samples):
         # as in `delta_hyp`, fixed point is selected at 0
         delta_hyp_k = 0.0
         if mode == "top_k":

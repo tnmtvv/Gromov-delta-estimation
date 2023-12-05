@@ -124,7 +124,7 @@ def build_csv(
                             deltas_diams = batched_delta_hyp(
                                 item_space,
                                 economic=True,
-                                max_workers=5,
+                                max_workers=25,
                                 batch_size=b_s,
                                 n_tries=n_try,
                                 seed=42,
@@ -161,7 +161,7 @@ def build_csv(
                                 n_tries=10,
                                 batch_size=400,
                                 seed=42,
-                                max_workers=25,
+                                max_workers=10,
                                 rank=10,
                                 way=way,
                             )
