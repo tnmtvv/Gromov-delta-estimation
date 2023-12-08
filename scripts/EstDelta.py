@@ -114,7 +114,7 @@ def build_csv(
                 item_space = V.T[:, indices[:rank]] @ np.diag(
                     correct_S[:rank]
                 )  # making item space from svd matrices
-
+                print(f"upper bound for {dataset_name}" + str(np.min(item_space)))
                 for b_s in val_list_dict["Batch_size"]:
                     for n_try in val_list_dict["N_tries"]:
                         if not compare:

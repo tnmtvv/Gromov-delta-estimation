@@ -105,7 +105,7 @@ def delta_hyp_condensed(dist_condensed: np.ndarray, n_samples: int) -> float:
         # as in `delta_hyp`, fixed point is selected at 0
         delta_hyp_k = 0.0
         dist_0k = 0.0 if k == 0 else dist_condensed[k - 1]
-        for i in range(n_samples):
+        for i in prange(n_samples):
             if i == 0:
                 dist_0i = 0.0
                 dist_ik = dist_0k
