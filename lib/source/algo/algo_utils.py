@@ -5,8 +5,16 @@ import math
 
 
 def get_far_away_pairs(A, N):
-    a = zip(*np.unravel_index(np.argsort(-A.ravel())[:N], A.shape))
-    return [(i, j) for (i, j) in a if i < j]
+    # a = zip(
+    #     *np.unravel_index(np.argsort(-A.ravel())[:N], A.shape)
+    # )  # переписать через партишн
+    # return [(i, j) for (i, j) in a if i < j]
+    a = -A.ravel()
+    a_indx = np.argpartition(a, N)
+    indx_sorted = zip(
+        *np.unravel_index(sorted(a_indx[: N + 1], key=lambda i: a[i]), A.shape)
+    )
+    return [(i, j) for (i, j) in indx_sorted if i < j]
 
 
 def cuda_prep(far_away_pairs, dist_matrix, block_size):

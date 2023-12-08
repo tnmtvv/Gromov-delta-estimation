@@ -12,7 +12,7 @@ from scipy.spatial.distance import pdist
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
-# from line_profiler import profile
+from line_profiler import profile
 
 from lib.source.algo.algo_utils import get_far_away_pairs, cuda_prep, calc_max_workers
 from lib.source.algo.CCL import (
@@ -41,7 +41,8 @@ def batched_delta_hyp(
     seed=42,
     economic=True,
     max_workers=25,
-    mem_bound=100,
+    mem_cpu_bound=150,
+    mem_gpu_bound=16,
     way="heuristic",
 ):
     """
@@ -81,59 +82,118 @@ def batched_delta_hyp(
     print("true X shape" + str(X.shape))
     n_objects, _ = X.shape  # number of items
     results = []
+    matrices_pairs = []
     x = cuda.device_array(1)  # resolving strange numba error
     rng = np.random.default_rng(seed)
-    max_workers = min(max_workers, calc_max_workers(batch_size, mem_bound, n_tries))
-    print("succsess")
-    print("available num of theads " + str(max_workers))
-    for part in range(int(n_tries // max_workers) + 1):
-        if max_workers * part >= n_tries:
-            break
-        else:
-            with ThreadPoolExecutor(
-                max_workers=min(n_tries - max_workers * part, max_workers)
-            ) as executor:
-                futures = []
-                for _ in range(executor._max_workers):
-                    if batch_size >= n_objects:
-                        print("batch_size >= n_objects")
-                        print(batch_size)
-                        print(n_objects)
-                        # `delta_hyp` selects a fixed point w.r.t which delta is computed
-                        # the fixed point always corresponds to the first object, so shuffling allows
-                        # exploring different initialization of a fixed point
-                        batch_idx = rng.permutation(n_objects)
-                    else:
-                        batch_idx = rng.choice(
-                            n_objects, batch_size, replace=False, shuffle=True
+    max_workers_cpu = min(
+        max_workers, calc_max_workers(batch_size, mem_cpu_bound, n_tries)
+    )
+    max_workers_gpu = min(
+        max_workers, calc_max_workers(batch_size, mem_gpu_bound, n_tries)
+    )
+
+    if way != "GPU":
+        print("succsess")
+        print("available num of theads " + str(max_workers_cpu))
+        for part in range(int(n_tries // max_workers_cpu) + 1):
+            if max_workers_cpu * part >= n_tries:
+                break
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=min(n_tries - max_workers * part, max_workers)
+                ) as executor:
+                    futures = []
+                    for _ in range(executor._max_workers):
+                        if batch_size >= n_objects:
+                            print("batch_size >= n_objects")
+                            print(batch_size)
+                            print(n_objects)
+                            # `delta_hyp` selects a fixed point w.r.t which delta is computed
+                            # the fixed point always corresponds to the first object, so shuffling allows
+                            # exploring different initialization of a fixed point
+                            batch_idx = rng.permutation(n_objects)
+                        else:
+                            batch_idx = rng.choice(
+                                n_objects, batch_size, replace=False, shuffle=True
+                            )
+                        item_space = X[batch_idx]
+                        print("batch done")
+                        future = executor.submit(
+                            delta_hyp_rel, item_space, economic=economic, way=way
                         )
-                    item_space = X[batch_idx]
-                    print("batch done")
-                    future = executor.submit(
-                        delta_hyp_rel, item_space, economic=economic, way=way
-                    )
-                    futures.append(future)
-                for i, future in enumerate(as_completed(futures)):
-                    delta_rel, diam = res = future.result()
-                    print("res: " + str(res))
-                    results.append(res)
-    # else:
-    #     far_away_pairs = []
-    #     dist_matrices = []
-    #     for _ in range(n_tries):
-    #         dist_matrix = pairwise_distances(X, metric="euclidean")
-    #         dist_matrices.append(dist_matrix)
-    #         far_away_pairs.append(
-    #             get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
-    #         )
-    #     results = delta_hyp_GPU(n_tries, far_away_pairs, dist_matrices)
+                        futures.append(future)
+                    for i, future in enumerate(as_completed(futures)):
+                        delta_rel, diam = res = future.result()
+                        print("res: " + str(res))
+                        results.append(res)
+    else:
+        # in case of GPU way we precalculating all pairs and keep them on the CPU in order to not to overload the GPU memory
+        print("success")
+        print("available num of theads " + str(max_workers_cpu))
+        for part in range(int(n_tries // max_workers_cpu) + 1):
+            if max_workers_cpu * part >= n_tries:
+                break
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=min(n_tries - max_workers_cpu * part, max_workers_cpu)
+                ) as executor:
+                    futures = []
+                    print(executor._max_workers)
+                    for _ in range(executor._max_workers):
+                        if batch_size >= n_objects:
+                            print("batch_size >= n_objects")
+                            print(batch_size)
+                            print(n_objects)
+                            # `delta_hyp` selects a fixed point w.r.t which delta is computed
+                            # the fixed point always corresponds to the first object, so shuffling allows
+                            # exploring different initialization of a fixed point
+                            batch_idx = rng.permutation(n_objects)
+                        else:
+                            batch_idx = rng.choice(
+                                n_objects, batch_size, replace=False, shuffle=True
+                            )
+                        item_space = X[batch_idx]
+                        print("batch done")
+                        future = executor.submit(preprocessing_for_GPU, item_space)
+                        futures.append(future)
+                    for _, future in enumerate(as_completed(futures)):
+                        matrix, pairs = cur_matrix_and_pairs = future.result()
+                        matrices_pairs.append(cur_matrix_and_pairs)
+            print("matrices done")
+            print("available num of theads gpu " + str(max_workers_gpu))
+            for part_gpu in range(int(len(matrices_pairs) // max_workers_gpu)):
+                if max_workers_gpu * part_gpu >= len(matrices_pairs):
+                    break
+                else:
+                    with ThreadPoolExecutor(
+                        max_workers=min(
+                            n_tries - max_workers_gpu * part_gpu, max_workers_gpu
+                        )
+                    ) as executor_gpu:
+                        futures = []
+                        for i in range(executor_gpu._max_workers):
+                            future = executor_gpu.submit(
+                                delta_hyp_GPU,
+                                matrices_pairs[part_gpu * max_workers_gpu + i][0],
+                                matrices_pairs[part_gpu * max_workers_gpu + i][1],
+                            )
+                            futures.append(future)
+                        for j, future in enumerate(as_completed(futures)):
+                            res = future.result()
+                            print("res: " + str(res))
+                            results.append(res)
+            matrices_pairs = []
     return results
 
 
-def delta_hyp_GPU(
-    far_away_pairs,
-    dist_matrix,
-):
+def preprocessing_for_GPU(X):
+    dist_matrix = pairwise_distances(X, metric="euclidean")
+    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+    return dist_matrix, far_away_pairs
+
+
+def delta_hyp_GPU(dist_matrix, far_away_pairs):
+    diam = np.max(dist_matrix)
     (
         n,
         x_coord_pairs,
@@ -147,7 +207,7 @@ def delta_hyp_GPU(
     delta_hyp_CCL_GPU[blockspergrid, threadsperblock](
         n, x_coord_pairs, y_coord_pairs, adj_m, delta_res
     )
-    return delta_res[0]
+    return 2 * delta_res[0] / diam, diam
 
 
 # @profile
@@ -189,7 +249,8 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             print("CCL")
             delta = delta_hyp_condensed_CCL(typed.List(far_away_pairs), dist_matrix)
         elif way == "GPU":
-            delta = delta_hyp_GPU(far_away_pairs, dist_matrix)
+            print("gpu")
+            delta, _ = delta_hyp_GPU(dist_matrix, far_away_pairs)
             # delta = np.max(results)
         elif way == "rand_top":
             const = min(50, dist_matrix.shape[0] - 1)
