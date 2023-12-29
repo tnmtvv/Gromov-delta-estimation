@@ -1,7 +1,8 @@
-import numpy as np
-from numba import jit, cuda, njit, prange
-import time
 import math
+import time
+
+import numpy as np
+from numba import cuda, jit, njit, prange
 
 
 def get_far_away_pairs(A, N):

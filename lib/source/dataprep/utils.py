@@ -1,18 +1,15 @@
 import csv
+import gzip
+import json
 import math
 import urllib.request
+from io import BytesIO
+from timeit import default_timer as timer
 from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-
 from scipy.sparse import csr_matrix
-
-import gzip
-import json
-
-from io import BytesIO
-from timeit import default_timer as timer
 
 
 def reindex(raw_data, index, filter_invalid=True, names=None):
