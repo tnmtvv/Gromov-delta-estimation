@@ -22,7 +22,7 @@ def resolve_dataset_name(datafile):
     return dataset_name
 
 
-def dataset_preprcessing(dataset_name, datafile, datasets_dir):
+def dataset_preprocessing(dataset_name, datafile, datasets_dir):
     if dataset_name in ("ml-1m", "movieLens20m", "ml-20m"):
         full_path = os.path.join(datasets_dir, dataset_name)
         if os.path.exists(full_path):

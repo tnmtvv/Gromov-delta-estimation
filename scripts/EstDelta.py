@@ -13,7 +13,7 @@ import libcontext
 
 from lib.source.dataprep.dataprep import (
     svd_decomp,
-    dataset_preprcessing,
+    dataset_preprocessing,
     resolve_dataset_name,
 )
 from lib.source.algo.delta import batched_delta_hyp, deltas_comparison
@@ -46,6 +46,7 @@ def build_csv(
     compare=False,
     verbose=True,
     percents=True,
+    ub=False,
 ):
     """Execute all the experiments according dependencies written in the delta_config file and fills csv file."""
     datafiles = [f for f in listdir(datasets_dir) if isfile(join(datasets_dir, f))]
@@ -78,7 +79,8 @@ def build_csv(
 
     for _, datafile in enumerate(datafiles):
         dataset_name = resolve_dataset_name(datafile)
-        matr_from_observ = dataset_preprcessing(dataset_name, datafile, datasets_dir)
+        print(dataset_name)
+        matr_from_observ = dataset_preprocessing(dataset_name, datafile, datasets_dir)
 
         for param in dependency:  # making grid of params
             val_list_dict[param] = make_list_params(
@@ -110,69 +112,75 @@ def build_csv(
             else:
                 svd_time = 0
 
-            for rank in val_list_dict["Rank"]:
-                item_space = V.T[:, indices[:rank]] @ np.diag(
-                    correct_S[:rank]
-                )  # making item space from svd matrices
-                print(f"upper bound for {dataset_name}" + str(np.min(item_space)))
-                for b_s in val_list_dict["Batch_size"]:
-                    for n_try in val_list_dict["N_tries"]:
-                        if not compare:
-                            delta_time_start = timer()
-                            if verbose:
-                                print("delta start")
-                            deltas_diams = batched_delta_hyp(
-                                item_space,
-                                economic=True,
-                                max_workers=25,
-                                batch_size=b_s,
-                                n_tries=n_try,
-                                seed=42,
-                                way=way,
-                            )  # calling delta calculation function
-                            delta_time = timer() - delta_time_start
+            if ub:
+                item_space = V.T[:, indices[:max_rank]] @ np.diag(correct_S[:max_rank])
+                print(
+                    f"upper bound for {dataset_name}"
+                    + str(np.min(item_space) / (2 * np.max(item_space)))
+                )
+            else:
+                for rank in val_list_dict["Rank"]:
+                    item_space = V.T[:, indices[:rank]] @ np.diag(
+                        correct_S[:rank]
+                    )  # making item space from svd matrices
+                    for b_s in val_list_dict["Batch_size"]:
+                        for n_try in val_list_dict["N_tries"]:
+                            if not compare:
+                                delta_time_start = timer()
+                                if verbose:
+                                    print("delta start")
+                                deltas_diams = batched_delta_hyp(
+                                    item_space,
+                                    economic=True,
+                                    max_workers=25,
+                                    batch_size=b_s,
+                                    n_tries=n_try,
+                                    seed=42,
+                                    way=way,
+                                )  # calling delta calculation function
+                                delta_time = timer() - delta_time_start
 
-                            deltas = list(map(lambda x: x[0], deltas_diams))
-                            diams = list(map(lambda x: x[1], deltas_diams))
-                            if verbose:
-                                print("cur_mean " + str(np.mean(deltas)))
-                            for d_idx, delta in enumerate(deltas):
-                                add_data(
-                                    path_to_csv,
-                                    {
-                                        "Delta": delta,
-                                        "Diam": diams[d_idx],
-                                        "Dataset": dataset_name,
-                                        "Mean_delta": np.mean(deltas),
-                                        "Std_delta": np.asarray(deltas).std(ddof=1),
-                                        "Rank": rank,
-                                        "Batch_size": b_s,
-                                        "Num_of_attempts": n_try,
-                                        "Mean_diam": np.mean(diams),
-                                        "Std_diam": np.std(diams),
-                                        "all_Time": svd_time + delta_time,
-                                        "svd_Time": svd_time,
-                                        "Way": way,
-                                    },
+                                deltas = list(map(lambda x: x[0], deltas_diams))
+                                diams = list(map(lambda x: x[1], deltas_diams))
+                                if verbose:
+                                    print("cur_mean " + str(np.mean(deltas)))
+                                for d_idx, delta in enumerate(deltas):
+                                    add_data(
+                                        path_to_csv,
+                                        {
+                                            "Delta": delta,
+                                            "Diam": diams[d_idx],
+                                            "Dataset": dataset_name,
+                                            "Mean_delta": np.mean(deltas),
+                                            "Std_delta": np.asarray(deltas).std(ddof=1),
+                                            "Rank": rank,
+                                            "Batch_size": b_s,
+                                            "Num_of_attempts": n_try,
+                                            "Mean_diam": np.mean(diams),
+                                            "Std_diam": np.std(diams),
+                                            "all_Time": svd_time + delta_time,
+                                            "svd_Time": svd_time,
+                                            "Way": way,
+                                        },
+                                    )
+                            else:
+                                deltas_comparison(
+                                    item_space,
+                                    n_tries=10,
+                                    batch_size=400,
+                                    seed=42,
+                                    max_workers=10,
+                                    rank=10,
+                                    way=way,
                                 )
-                        else:
-                            deltas_comparison(
-                                item_space,
-                                n_tries=10,
-                                batch_size=400,
-                                seed=42,
-                                max_workers=10,
-                                rank=10,
-                                way=way,
-                            )
+                            if verbose:
+                                print("done try " + str(n_try))
                         if verbose:
-                            print("done try " + str(n_try))
+                            print("done batch_size " + str(b_s))
                     if verbose:
-                        print("done batch_size " + str(b_s))
+                        print("done rank " + str(rank))
                 if verbose:
-                    print("done rank " + str(rank))
-            if verbose:
-                print("done " + str(way))
+                    print("done " + str(way))
 
 
 def main(

@@ -9,8 +9,14 @@ from timeit import default_timer as timer
 from sklearn.metrics import pairwise_distances
 
 from scipy.spatial.distance import pdist
+from scipy.spatial.distance import squareform
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
+
+# from cupyx.scipy.spatial import distance_matrix
+# import cupyx
+# import cupy
 
 from line_profiler import profile
 
@@ -33,7 +39,6 @@ from lib.source.algo.true_delta import delta_hyp
 # from cupyx.scipy.spatial import distance_matrix
 
 
-# @profile
 def batched_delta_hyp(
     X,
     n_tries=10,
@@ -41,7 +46,7 @@ def batched_delta_hyp(
     seed=42,
     economic=True,
     max_workers=25,
-    mem_cpu_bound=150,
+    mem_cpu_bound=16,
     mem_gpu_bound=16,
     way="heuristic",
 ):
@@ -100,7 +105,7 @@ def batched_delta_hyp(
                 break
             else:
                 with ThreadPoolExecutor(
-                    max_workers=min(n_tries - max_workers * part, max_workers)
+                    max_workers=min(n_tries - max_workers_cpu * part, max_workers_cpu)
                 ) as executor:
                     futures = []
                     for _ in range(executor._max_workers):
@@ -187,7 +192,9 @@ def batched_delta_hyp(
 
 
 def preprocessing_for_GPU(X):
+    # dist_matrix = squareform(cupy.ndarray.get(cupyx.scipy.spatial.distance.pdist(X)))
     dist_matrix = pairwise_distances(X, metric="euclidean")
+    print(dist_matrix.shape)
     far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
     return dist_matrix, far_away_pairs
 
@@ -208,9 +215,10 @@ def delta_hyp_GPU(dist_matrix, far_away_pairs):
         n, x_coord_pairs, y_coord_pairs, adj_m, delta_res
     )
     return 2 * delta_res[0] / diam, diam
+    # return 0, diam
 
 
-# @profile
+@profile
 def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
     """
     Computes relative delta hyperbolicity value and diameter from coordinates matrix.
@@ -232,26 +240,29 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
 
     """
 
-    if way != "condenced":
-        dist_matrix = pairwise_distances(X, metric="euclidean")
-    else:
+    # if way != "condenced":
+
+    if way == "condenced":
         dist_matrix = pdist(X)
+    else:
+        dist_matrix = pairwise_distances(X)
     diam = np.max(dist_matrix)
 
     if economic:
         if way in ["heuristic_CCL", "CCL", "GPU"]:
             far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
-        if way == "heuristic_CCL":
+        if way == "GPU":
+            print("gpu")
+            delta, _ = delta_hyp_GPU(dist_matrix, far_away_pairs)
+            # delta = np.max(results)
+        elif way == "heuristic_CCL":
             print("pairs len " + str(len(far_away_pairs)))
             print("pairs size: " + str(sys.getsizeof(far_away_pairs)))
             delta = delta_CCL_heuristic(dist_matrix, typed.List(far_away_pairs), 100000)
         elif way == "CCL":
             print("CCL")
             delta = delta_hyp_condensed_CCL(typed.List(far_away_pairs), dist_matrix)
-        elif way == "GPU":
-            print("gpu")
-            delta, _ = delta_hyp_GPU(dist_matrix, far_away_pairs)
-            # delta = np.max(results)
+
         elif way == "rand_top":
             const = min(50, dist_matrix.shape[0] - 1)
             delta = delta_hyp_condensed_heuristic(
@@ -274,6 +285,7 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
         delta = delta_hyp(dist_matrix)
     delta_rel = 2 * delta / diam
     return delta_rel, diam
+    # return 0, diam
 
 
 def deltas_comparison(
