@@ -1,38 +1,34 @@
-import numpy as np
-import sys
 import gc
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import cpu_count
+from timeit import default_timer as timer
+
+import numpy as np
+from lib.source.algo.algo_utils import (calc_max_workers, cuda_prep,
+                                        get_far_away_pairs)
+from lib.source.algo.CCL import (delta_CCL_heuristic, delta_hyp_CCL_GPU,
+                                 delta_hyp_condensed_CCL)
+from lib.source.algo.condenced import (delta_hyp_condensed,
+                                       delta_hyp_condensed_heuristic)
+from lib.source.algo.tensor import delta_protes, tensor_approximation
+from lib.source.algo.true_delta import delta_hyp
+from line_profiler import profile
+from numba import cuda, get_num_threads, njit, prange, typed
+from scipy.spatial.distance import pdist, squareform
+from sklearn.metrics import pairwise_distances
 
 # import libcontext
 
-from numba import typed, get_num_threads, cuda, njit, prange
-from timeit import default_timer as timer
-from sklearn.metrics import pairwise_distances
 
-from scipy.spatial.distance import pdist
-from scipy.spatial.distance import squareform
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from multiprocessing import cpu_count
 
 # from cupyx.scipy.spatial import distance_matrix
 # import cupyx
 # import cupy
 
-from line_profiler import profile
 
-from lib.source.algo.algo_utils import get_far_away_pairs, cuda_prep, calc_max_workers
-from lib.source.algo.CCL import (
-    delta_CCL_heuristic,
-    delta_hyp_condensed_CCL,
-    delta_hyp_CCL_GPU,
-)
-from lib.source.algo.condenced import (
-    delta_hyp_condensed_heuristic,
-    delta_hyp_condensed,
-)
-from lib.source.algo.tensor import delta_protes, tensor_approximation
 
-from lib.source.algo.true_delta import delta_hyp
 
 # from memory_profiler import profile
 # from dist_matrix.cuda_dist_matrix_full import dist_matrix as gpu_dist_matrix

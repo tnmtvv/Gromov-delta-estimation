@@ -1,6 +1,6 @@
+import warnings
 from urllib import request
 from urllib.error import URLError
-import warnings
 
 
 def get_files(datasets):

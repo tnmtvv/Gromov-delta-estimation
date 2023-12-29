@@ -1,16 +1,12 @@
+import os
 from os import listdir
 from os.path import isfile, join
-from sklearn.utils.extmath import randomized_svd
 from timeit import default_timer as timer
+
 import numpy as np
-
-import os
-
-from lib.source.dataprep.utils import (
-    get_movielens_data,
-    matrix_from_observations,
-    get_reviews,
-)
+from lib.source.dataprep.utils import (get_movielens_data, get_reviews,
+                                       matrix_from_observations)
+from sklearn.utils.extmath import randomized_svd
 
 
 def resolve_dataset_name(datafile):

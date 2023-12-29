@@ -1,6 +1,6 @@
-from numba import njit, prange, cuda
 import numpy as np
 from lib.source.algo.algo_utils import s_delta_parallel
+from numba import cuda, njit, prange
 
 
 @njit(parallel=True, fastmath=True)
