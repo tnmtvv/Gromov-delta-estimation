@@ -13,7 +13,7 @@ from lib.source.algo.delta import delta_hyp_GPU
 
 def test_CCL_true_delta():
     dist_matrix = generate_dists(500)
-    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 50)
+    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 60)
 
     delta_CCL = delta_hyp_condensed_CCL(typed.List(far_away_pairs), dist_matrix)
     true_delta = delta_hyp(dist_matrix)
