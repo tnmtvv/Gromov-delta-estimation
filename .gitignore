@@ -164,4 +164,4 @@ draft_scripts/
 results/
 *.csv
 *.dat
-*.txt
+# *.txt
