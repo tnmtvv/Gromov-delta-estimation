@@ -5,12 +5,13 @@ from multiprocessing import cpu_count
 from timeit import default_timer as timer
 
 import numpy as np
-from lib.source.algo.algo_utils import (calc_max_workers, cuda_prep,
-                                        get_far_away_pairs)
-from lib.source.algo.CCL import (delta_CCL_heuristic, delta_hyp_CCL_GPU,
-                                 delta_hyp_condensed_CCL)
-from lib.source.algo.condenced import (delta_hyp_condensed,
-                                       delta_hyp_condensed_heuristic)
+from lib.source.algo.algo_utils import calc_max_workers, cuda_prep, get_far_away_pairs
+from lib.source.algo.CCL import (
+    delta_CCL_heuristic,
+    delta_hyp_CCL_GPU,
+    delta_hyp_condensed_CCL,
+)
+from lib.source.algo.condenced import delta_hyp_condensed, delta_hyp_condensed_heuristic
 from lib.source.algo.tensor import delta_protes, tensor_approximation
 from lib.source.algo.true_delta import delta_hyp
 from line_profiler import profile
@@ -21,13 +22,9 @@ from sklearn.metrics import pairwise_distances
 # import libcontext
 
 
-
-
 # from cupyx.scipy.spatial import distance_matrix
 # import cupyx
 # import cupy
-
-
 
 
 # from memory_profiler import profile
@@ -211,7 +208,6 @@ def delta_hyp_GPU(dist_matrix, far_away_pairs):
         n, x_coord_pairs, y_coord_pairs, adj_m, delta_res
     )
     return 2 * delta_res[0] / diam, diam
-    # return 0, diam
 
 
 @profile
@@ -281,7 +277,6 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
         delta = delta_hyp(dist_matrix)
     delta_rel = 2 * delta / diam
     return delta_rel, diam
-    # return 0, diam
 
 
 def deltas_comparison(
