@@ -110,6 +110,37 @@ def delta_hyp_CCL_GPU(n, fisrt_points, second_points, adj_m, delta_res):
             )
 
 
+@cuda.jit
+def delta_CCL_cartesian(dist_array, delta_res):
+    row = cuda.grid(1)
+    cuda.atomic.max(
+        delta_res,
+        (0),
+        (
+            dist_array[row][0]
+            + dist_array[row][1]
+            - max(
+                dist_array[row][2] + dist_array[row][3],
+                dist_array[row][4] + dist_array[row][5],
+            )
+        )
+        / 2,
+    )
+
+
+@cuda.jit
+def delta_CCL_cartesian_Nastya(dist_array, delta_res):
+    row = cuda.grid(1)
+    delta_res[row] = (
+        dist_array[row][0]
+        + dist_array[row][1]
+        - max(
+            dist_array[row][2] + dist_array[row][4],
+            dist_array[row][3] + dist_array[row][5],
+        )
+    ) / 2
+
+
 def delta_CCL_heuristic(A, far_away_pairs, i_break=50000):
     """
     Version of CCL algo with iterations budjet.
