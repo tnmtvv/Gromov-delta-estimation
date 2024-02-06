@@ -9,18 +9,16 @@ import numpy as np
 import pandas as pd
 import yaml
 from lib.source.algo.delta import batched_delta_hyp, deltas_comparison
-from lib.source.dataprep.dataprep import (dataset_preprocessing,
-                                          resolve_dataset_name, svd_decomp)
+from lib.source.dataprep.dataprep import (
+    dataset_preprocessing,
+    resolve_dataset_name,
+    svd_decomp,
+)
 from lib.source.dataprep.utils import add_data, make_list_params
 
 import libcontext
 
-# from memory_profiler import profile
 
-
-
-
-# @profile
 def build_csv(
     datasets_dir,
     csv_dir,
