@@ -26,4 +26,4 @@ dependencies:
   - scipy=1.11.2
   - seaborn=0.12.2
   # Pytorch
-  - pytorch=2.0.1
+  - pytorch=1.12.0

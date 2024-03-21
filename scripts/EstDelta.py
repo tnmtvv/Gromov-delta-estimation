@@ -8,6 +8,7 @@ from timeit import default_timer as timer
 import numpy as np
 import pandas as pd
 import yaml
+import libcontext
 from lib.source.algo.delta import batched_delta_hyp, deltas_comparison
 from lib.source.dataprep.dataprep import (
     dataset_preprocessing,
@@ -16,7 +17,8 @@ from lib.source.dataprep.dataprep import (
 )
 from lib.source.dataprep.utils import add_data, make_list_params
 
-import libcontext
+
+from line_profiler import profile
 
 
 def build_csv(
@@ -172,6 +174,7 @@ def build_csv(
                     print("done " + str(way))
 
 
+@profile
 def main(
     csv_name,
     path_to_config,

@@ -165,3 +165,4 @@ results/
 *.csv
 *.dat
 # *.txt
+*.npy
