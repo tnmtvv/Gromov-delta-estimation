@@ -90,7 +90,7 @@ def build_csv(
             print(val_list_dict["N_tries"])
             print("Rank " + str(val_list_dict["Rank"]))
             print(val_list_dict["Way"])
-        max_rank = np.max(val_list_dict["Rank"])
+        # max_rank = np.max(val_list_dict["Rank"])
 
         for way in val_list_dict["Way"]:  # svd
             svd_time_start = timer()
@@ -110,10 +110,17 @@ def build_csv(
                     + str(np.min(item_space) / (2 * np.max(item_space)))
                 )
             else:
-                for rank in val_list_dict["Rank"]:
-                    item_space = V.T[:, indices[:rank]] @ np.diag(
-                        correct_S[:rank]
-                    )  # making item space from svd matrices
+                # for rank in val_list_dict["Rank"]:
+                #     item_space = V.T[:, indices[:rank]] @ np.diag(
+                #         correct_S[:rank]
+                #     )  # making item space from svd matrices
+                emb_matricies = [f for f in listdir("/workspace/embeddings") if isfile(join("/workspace/embeddings", f))]
+                print(emb_matricies)
+                # ranks = [32, 64, 128, 256, 512, 1024, 2048, 3706]
+                ranks = [int(f[4:-4]) for f in listdir("/workspace/embeddings") if isfile(join("/workspace/embeddings", f))]
+                for indx, emb_file in enumerate(emb_matricies):
+                    item_space = np.load(join("/workspace/embeddings", emb_file), allow_pickle=True)
+                    print(item_space)
                     for b_s in val_list_dict["Batch_size"]:
                         for n_try in val_list_dict["N_tries"]:
                             if not compare:
@@ -144,14 +151,14 @@ def build_csv(
                                             "Dataset": dataset_name,
                                             "Mean_delta": np.mean(deltas),
                                             "Std_delta": np.asarray(deltas).std(ddof=1),
-                                            "Rank": rank,
+                                            "Rank": ranks[indx],
                                             "Batch_size": b_s,
                                             "Num_of_attempts": n_try,
                                             "Mean_diam": np.mean(diams),
                                             "Std_diam": np.std(diams),
                                             "all_Time": svd_time + delta_time,
                                             "svd_Time": svd_time,
-                                            "Way": way,
+                                            "Way": f"{way}_emb",
                                         },
                                     )
                             else:
@@ -169,10 +176,9 @@ def build_csv(
                         if verbose:
                             print("done batch_size " + str(b_s))
                     if verbose:
-                        print("done rank " + str(rank))
+                        print("done rank " + str(ranks[indx]))
                 if verbose:
                     print("done " + str(way))
-
 
 @profile
 def main(
