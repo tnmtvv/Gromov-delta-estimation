@@ -3,6 +3,64 @@ import time
 
 import numpy as np
 from numba import cuda, jit, njit, prange
+from line_profiler import profile
+
+def calculate_frequencies(rows, cols, dict_freq):
+    for i in range(rows.shape[0]):
+      for j in range(rows.shape[1]):
+        tup = tuple((rows[i][j], cols[i][j]))
+        dict_freq[tup] += 1
+    return dict_freq
+
+
+@njit(parallel=True)
+def prepare_batch_indices_flat(far_away_pairs, start_ind, end_ind, shape):
+    batch_indices = np.empty(int(end_ind - start_ind) * 6, dtype=np.int32)
+
+
+    for indx in prange(start_ind, end_ind):
+        i, j = indx_to_2d(indx)
+
+        pair_1 = far_away_pairs[i]
+        pair_2 = far_away_pairs[j]
+
+        batch_indices[6 * (indx-start_ind)] = pair_1[0]*shape[1] + pair_1[1]
+        batch_indices[6 * (indx-start_ind) + 1] = pair_2[0]*shape[1] + pair_2[1]
+        batch_indices[6 * (indx-start_ind) + 2] = pair_1[0]*shape[1] + pair_2[0]
+        batch_indices[6 * (indx-start_ind) + 3] = pair_1[1]*shape[1] + pair_2[1]
+        batch_indices[6 * (indx-start_ind) + 3] = pair_1[0]*shape[1] + pair_2[1]
+        batch_indices[6 * (indx-start_ind) + 4] = pair_1[1]*shape[1] + pair_2[0]
+        # batch_indices_row[indx - start_ind] = np.array(
+        #     [pair_1[0], pair_2[0], pair_1[0], pair_1[1], pair_1[0], pair_1[1]],
+        #     dtype=np.int32,
+        # )
+
+        # batch_indices_col[indx - start_ind] = np.array(
+        #     [pair_1[1], pair_2[1], pair_2[0], pair_2[1], pair_2[1], pair_2[0]],
+        #     dtype=np.int32,
+        # )
+
+    return batch_indices
+
+def rows_cols_vals(shape, rows, cols, d_freq):
+    true_rows = np.arange(shape[0])
+    true_cols = np.arange(shape[1])
+    values = np.zeros(len(true_rows))
+    for i in range(true_rows):  
+        if (true_rows[i], true_cols[i]) in d_freq.keys():
+            values[i] = d_freq(true_rows[i], true_cols[i])
+        else:
+           values[i] = 0
+    return true_rows, true_cols, values
+
+
+def add_data(csv_path, dict_vals):
+    """Adds data to csv file."""
+    new_rows = []
+    new_rows.append(dict_vals.values())
+    with open(csv_path, "a", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerows(new_rows)
 
 
 def get_far_away_pairs(A, N):
@@ -25,19 +83,62 @@ def matrix_to_triangular(arr):
 
 
 def cuda_prep_cartesian(dist_array, block_size):
-    threadsperblock = (block_size, block_size)
+
+    # threadsperblock = (block_size, block_size)
+    threadsperblock = block_size
+    
     # print(len(dist_array))
-    # print(dist_array.shape)
-    blockspergrid_x = min(
-        65535, int(np.ceil(dist_array.shape[0] / threadsperblock[0])) + 1
-    )
-    blockspergrid_y = min(
-        65535, int(np.ceil(dist_array.shape[0] / threadsperblock[1])) + 1
-    )
-    blockspergrid = (blockspergrid_x, blockspergrid_y)
+    
+
+    blockspergrid = min(65535, int(dist_array.shape[0] / threadsperblock) + 1)
+    # blockspergrid_y = min(
+    #     65535, int(np.ceil(dist_array.shape[0] / threadsperblock[1])) + 1
+    # )
+
+    # blockspergrid = (blockspergrid_x, blockspergrid_y)
+    # blockspergrid = blockspergrid_x
     cartesian_dist_array = cuda.to_device(np.asarray(dist_array))
-    delta_res = cuda.to_device(list(np.zeros(1)))
+    delta_res = cuda.to_device(np.zeros(1))
+    # deltas_res = cuda.device_array(cartesian_dist_array.shape[0])
     return cartesian_dist_array, delta_res, threadsperblock, blockspergrid
+
+
+def cuda_prep_true_delta(dist_matrix):
+    k_1 = int(math.log2(dist_matrix.shape[0])) + 1
+    k_2 = 2 ** k_1 - 1
+    k_3 = dist_matrix.shape[0]
+    adj_m = cuda.to_device(dist_matrix.flatten()) 
+
+    k = cuda.to_device([k_2, k_1, k_3])
+    delta_res = cuda.to_device(np.zeros(1))
+
+    print([k_2, k_1, k_3])
+
+
+    block_size = (16, 16, 4)
+    threadsperblock = block_size
+    # np.int64(f"{dist_matrix.shape[0]}{dist_matrix.shape[0]}")
+    blockspergrid_x = min(65535, int(np.ceil(dist_matrix.shape[0] ** 2 / threadsperblock[0])) + 1)
+    blockspergrid_y = min(65535, int(np.ceil(dist_matrix.shape[0] / threadsperblock[1])) + 1)
+    blockspergrid_z = min(65535, int(np.ceil(dist_matrix.shape[0] / threadsperblock[2])) + 1)
+
+    blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
+
+    return adj_m, k, delta_res, threadsperblock, blockspergrid
+
+
+# def cuda_prep_cartesian(dist_array, block_size):
+#     threadsperblock = (block_size, block_size)
+#     blockspergrid_x = min(
+#         65535, int(np.ceil(dist_array.shape[0] / threadsperblock[0])) + 1
+#     )
+#     blockspergrid_y = min(
+#         65535, int(np.ceil(dist_array.shape[0] / threadsperblock[1])) + 1
+#     )
+#     blockspergrid = (blockspergrid_x, blockspergrid_y)
+#     cartesian_dist_array = cuda.to_device(np.asarray(dist_array))
+#     deltas_res = cuda.device_array(cartesian_dist_array.shape[0])
+#     return cartesian_dist_array, deltas_res, threadsperblock, blockspergrid
 
 
 def cuda_prep(far_away_pairs, dist_matrix, block_size):

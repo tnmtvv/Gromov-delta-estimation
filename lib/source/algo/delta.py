@@ -3,6 +3,10 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 from timeit import default_timer as timer
+import random 
+import collections
+import itertools 
+import cython_batching
 
 import numpy as np
 from lib.source.algo.algo_utils import (
@@ -12,18 +16,24 @@ from lib.source.algo.algo_utils import (
     calc_max_lines,
     indx_to_2d,
     cuda_prep_cartesian,
+    cuda_prep_true_delta,
     permutations,
     combinations,
+    add_data, 
+    calculate_frequencies,
+    prepare_batch_indices_flat
 )
+
 from lib.source.algo.CCL import (
     delta_CCL_heuristic,
     delta_hyp_CCL_GPU,
     delta_hyp_condensed_CCL,
     delta_CCL_cartesian,
+    delta_CCL_cartesian_Nastya,
 )
 from lib.source.algo.condenced import delta_hyp_condensed, delta_hyp_condensed_heuristic
 from lib.source.algo.tensor import delta_protes, tensor_approximation
-from lib.source.algo.true_delta import delta_hyp
+from lib.source.algo.true_delta import delta_hyp, true_delta_gpu
 from line_profiler import profile
 from numba import cuda, get_num_threads, njit, prange, typed
 from scipy.spatial.distance import pdist, squareform
@@ -41,13 +51,13 @@ from sklearn.metrics import pairwise_distances
 # from dist_matrix.cuda_dist_matrix_full import dist_matrix as gpu_dist_matrix
 # from cupyx.scipy.spatial import distance_matrix
 
-
+      
 def batched_delta_hyp(
     X,
     n_tries=10,
     batch_size=400,
     seed=42,
-    economic=True,
+    economic=False,
     max_workers=25,
     mem_cpu_bound=16,
     mem_gpu_bound=16,
@@ -101,7 +111,7 @@ def batched_delta_hyp(
     max_workers_gpu = min(
         max_workers, calc_max_workers(batch_size, mem_gpu_bound, n_tries)
     )
-    if max_workers_gpu < 25:
+    if max_workers_gpu < 1:
         way = "GPU_cartesian"
 
     if way != "GPU" and way != "GPU_cartesian":
@@ -197,20 +207,27 @@ def batched_delta_hyp(
             elif way == "GPU_cartesian":
                 for i in range(len(matrices_pairs)):
                     max_lines = calc_max_lines(mem_gpu_bound, len(matrices_pairs[i][1]))
-                    res = delta_cartesian_way(
+                    # res_1 = delta_cartesian_way(
+                    #     matrices_pairs[i][0],
+                    #     np.asarray(matrices_pairs[i][1]),
+                    #     max_lines,
+                    # )
+                    res_2 = delta_cartesian_way_new(
                         matrices_pairs[i][0],
-                        typed.List(matrices_pairs[i][1]),
+                        np.asarray(matrices_pairs[i][1], dtype=np.int32),
                         max_lines,
                     )
-                    results.append(res)
-    return results
+                    # experiments()
 
+                    results.append(res_2)
+    return results
 
 def preprocessing_for_GPU(X):
     # dist_matrix = squareform(cupy.ndarray.get(cupyx.scipy.spatial.distance.pdist(X)))
+    print(X.shape)
     dist_matrix = pairwise_distances(X, metric="euclidean")
     print(dist_matrix.shape)
-    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 40)
     return dist_matrix, far_away_pairs
 
 
@@ -234,25 +251,34 @@ def delta_hyp_GPU(dist_matrix, far_away_pairs):
     return 2 * delta_res[0] / diam, diam
 
 
+def rows_cols_vals(X, rows, cols, d_freq):
+    true_rows = [i for _ in range(X.shape[0])]
+    true_cols = [j for _ in range(X.shape[1])]
+    values = []
+    for i in range(true_rows):  
+      if (true_rows[i], true_cols[i]) in d_freq.keys():
+          values[i] = d_freq(true_rows[i], true_cols[i])
+      else:
+         values[i] = 0
+    return true_rows, true_cols, values
+
+
+# @profile
 # @njit(parallel=True)
-@profile
-def delta_cartesian_way(X, far_away_pairs, batch_size):
+def delta_cartesian_way(X, far_away_pairs, batch_size_items):
+    print("old way")
     diam = np.max(X)
 
-    cartesian_size = int(len(far_away_pairs) * (len(far_away_pairs) - 1) / 2)
+    cartesian_size = len(far_away_pairs) * (len(far_away_pairs) - 1) / 2
 
-    batch_N = int(cartesian_size // batch_size) + 1
+    batch_N = int(cartesian_size // batch_size_items) + 1
     deltas = np.zeros(batch_N)
-    print(f"all_size: {cartesian_size}")
-    print(f"batch_size: {batch_size}")
+    print(f"batch_size: {batch_size_items}")
 
     for i in range(batch_N):
         print(f"{i} batch started")
         batch = prepare_batch(
-            X,
-            np.asarray(far_away_pairs),
-            i * batch_size,
-            min((i + 1) * batch_size, cartesian_size),
+            X, far_away_pairs, i * batch_size_items, (i + 1) * batch_size_items
         )
         print("batch built")
 
@@ -261,38 +287,198 @@ def delta_cartesian_way(X, far_away_pairs, batch_size):
             delta_res,
             threadsperblock,
             blockspergrid,
-        ) = cuda_prep_cartesian(batch, 32)
+        ) = cuda_prep_cartesian(batch, 1024)
+        print("cuda_prep_done")
+
         delta_CCL_cartesian[blockspergrid, threadsperblock](
             cartesian_dist_array, delta_res
         )
+        # deltas_res = deltas_res.copy_to_host()
+
+        deltas[i] = delta_res[0]
+        del cartesian_dist_array
+        # del deltas_res
+
+    delta = max(deltas)
+    return 2 * delta / diam, diam
+
+
+def generate_synthetic_points(dimensions, num_points):
+    points = np.random.rand(num_points, dimensions)
+    return points
+
+# @njit(parallel=True)
+# def prepare_batch_indices(far_away_pairs, start_ind, end_ind):
+#     batch_indices_row = np.empty((int(end_ind - start_ind), 6), dtype=np.int32)
+#     batch_indices_col = np.empty((int(end_ind - start_ind), 6), dtype=np.int32)
+#     for indx in prange(start_ind, end_ind):
+#         i, j = indx_to_2d(indx)
+#         pair_1 = far_away_pairs[i]
+#         pair_2 = far_away_pairs[j]
+#         batch_indices_row[indx - start_ind] = np.array(
+#             [pair_1[0], pair_2[0], pair_1[0], pair_1[1], pair_1[0], pair_1[1]],
+#             dtype=np.int32,
+#         )
+#         batch_indices_col[indx - start_ind] = np.array(
+#             [pair_1[1], pair_2[1], pair_2[0], pair_2[1], pair_2[1], pair_2[0]],
+#             dtype=np.int32,
+#         )
+
+#     return batch_indices_row, batch_indices_col
+
+
+def generate_indices(num, dim):
+    X = np.random.randint(0, dim - 1, (num, 2))
+    return X
+#   return [(random.randint(0, dim-1), random.randint(0, dim-1)) for _ in range(num)]
+
+
+def experiments():
+    x = cuda.device_array(1)
+    dims = [5000]
+
+    times = []
+    for dim in dims:
+        point_matr = generate_synthetic_points(3, dim)
+        dist_matrix = pairwise_distances(point_matr)
+        del point_matr
+
+        # indices = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * )
+        indices = generate_indices(290152005, dim)
+        print(len(indices))
+        rows, cols = prepare_batch_indices(indices, 0, len(indices))
+        print(f"rows.shape: {rows.shape}")
+        print(f"cols.shape: {cols.shape}")
+        time_start = timer()
+
+        batch = dist_matrix[
+            rows.reshape(-1),
+            cols.reshape(-1),
+        ].reshape(-1, 6)
+        overall_time = timer() - time_start
+        times.append(overall_time)
+
+        del dist_matrix
+        del indices
+        print(f"done {dim}")
+
+    print(times)
+
+# @profile
+def delta_cartesian_way_new(X, far_away_pairs, batch_size):
+    print("new way")
+    diam = np.max(X)
+
+    cartesian_size = int(len(far_away_pairs) * (len(far_away_pairs) - 1) / 2)
+
+    batch_N = int(cartesian_size // batch_size) + 1
+    deltas = np.empty(batch_N)
+
+    print(f"shape X: {X.shape}")
+    print(f"shape far_away_pairs: {far_away_pairs.shape}")
+    print(f"all_size: {cartesian_size}")
+    print(f"batch_size: {batch_size}")
+    print(f"batches: {batch_N}")
+
+    batch_times = []
+    indices_times = []
+
+    for i in range(batch_N):
+        print(f"{i} batch started")
+        start_ind = timer()
+        (
+            indicies
+        ) = prepare_batch_indices_flat(
+            far_away_pairs,
+            i * batch_size,
+            min((i + 1) * batch_size, cartesian_size),
+            X.shape
+        )
+        # indices_rows, indices_cols  = prepare_batch_indices(far_away_pairs, i * batch_size, min((i + 1) * batch_size, cartesian_size))
+        # print(indices_rows.shape)
+        # print(indices_cols.shape)
+
+        end_ind = timer()
+        indices_times.append(end_ind - start_ind)
+
+        # print(f"indices shape: {indicies.shape}")
+
+        start_batch = timer()
+
+        # batch = X[
+        #     batch_indices_col.reshape(-1),
+        #     batch_indices_row.reshape(-1),
+        # ].reshape(-1, 6)
+        batch = cython_batching.cython_flatten(indicies.ravel(), X.ravel()).reshape(-1, 6)
+        # print(X.shape)
+        # batch = cython_batching.cython_flatten(X, indices_rows.ravel(), indices_cols.ravel()).reshape(-1, 6)
+
+        end_batch = timer()
+        print(batch.shape)
+
+        # freq_dict = collections.defaultdict(int)
+        # print("building freq")
+
+        # freq_dict = calculate_frequencies(indices, freq_dict)
+        # most_freq = dict(sorted(freq_dict.items(), key=lambda x: x[1], reverse=True)[0:10])
+
+        # print(most_freq)
+
+        batch_times.append(end_batch - start_batch)
+        # batch = np.asarray([[0, 0, 0, 0, 0, 0]])
+        print("batch built")
+
+        (
+            cartesian_dist_array,
+            delta_res,
+            threadsperblock,
+            blockspergrid,
+        ) = cuda_prep_cartesian(batch, 1024)
+        delta_CCL_cartesian[blockspergrid, threadsperblock](
+            cartesian_dist_array, delta_res
+        )
+        print("cuda prep done")
         deltas[i] = delta_res[0]
         del cartesian_dist_array
     # print(deltas)
     delta = max(deltas)
     # print(delta)
+
+    print("batch_times: ")
+    print(np.min(batch_times))
+    print(np.max(batch_times))
+    print(np.mean(batch_times))
+    print(batch_times)
+
+    print("ind_times: ")
+    print(np.min(indices_times))
+    print(np.max(indices_times))
+    print(np.mean(indices_times))
+    print(indices_times)
     return 2 * delta / diam, diam
 
-
-@profile
+    
+# @profile
 @njit(parallel=True)
 def prepare_batch(X, far_away_pairs, start_ind, end_ind):
-    batch = np.zeros((int(end_ind - start_ind), 6))
+    batch = np.empty((int(end_ind - start_ind), 6))
     for indx in prange(start_ind, end_ind):
-        batch_line = np.zeros(6)
+        batch_line = np.empty(6)
         i, j = indx_to_2d(indx)
-        pair_1 = far_away_pairs[i]
-        pair_2 = far_away_pairs[j]
+        pair_1 = far_away_pairs[min(i, len(far_away_pairs) - 1)]
+        pair_2 = far_away_pairs[min(j, len(far_away_pairs) - 1)]
         indices = [
             list(pair_1),
             list(pair_2),
-            list([pair_1[0], pair_2[0]]),
-            list([pair_1[1], pair_2[1]]),
-            list([pair_1[0], pair_2[1]]),
-            list([pair_1[1], pair_2[0]]),
+            [pair_1[0], pair_2[0]],
+            [pair_1[1], pair_2[1]],
+            [pair_1[0], pair_2[1]],
+            [pair_1[1], pair_2[0]],
         ]
 
         for k in prange(6):
             batch_line[k] = X[indices[k][0], indices[k][1]]
+            # batch_line[k] = X[indices]
 
         batch[indx - start_ind] = batch_line
 
@@ -300,7 +486,40 @@ def prepare_batch(X, far_away_pairs, start_ind, end_ind):
 
 
 # @profile
-def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
+@njit(parallel=True)
+def prepare_batch_indices(far_away_pairs, start_ind, end_ind):
+    batch_indices_row = np.empty((int(end_ind - start_ind), 6), dtype=np.int32)
+    batch_indices_col = np.empty((int(end_ind - start_ind), 6), dtype=np.int32)
+
+    for indx in prange(start_ind, end_ind):
+        i, j = indx_to_2d(indx)
+
+        pair_1 = far_away_pairs[i]
+        pair_2 = far_away_pairs[j]
+
+        batch_indices_row[indx - start_ind][0] = pair_1[0]
+        batch_indices_col[indx - start_ind][0] = pair_1[1]
+
+        batch_indices_row[indx - start_ind][1] = pair_2[0]
+        batch_indices_col[indx - start_ind][1] = pair_2[1]
+
+        batch_indices_row[indx - start_ind][2] = pair_1[0]
+        batch_indices_col[indx - start_ind][2] = pair_2[0]
+
+        batch_indices_row[indx - start_ind][3] = pair_1[1]
+        batch_indices_col[indx - start_ind][3] = pair_2[1]
+
+        batch_indices_row[indx - start_ind][4] = pair_1[0]
+        batch_indices_col[indx - start_ind][4] = pair_2[1]
+
+        batch_indices_row[indx - start_ind][5] = pair_1[1]
+        batch_indices_col[indx - start_ind][5] = pair_2[0]
+
+    return batch_indices_row, batch_indices_col
+
+
+# @profile
+def delta_hyp_rel(X: np.ndarray, economic: bool = False, way="new"):
     """
     Computes relative delta hyperbolicity value and diameter from coordinates matrix.
 
@@ -328,7 +547,7 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
 
     if economic:
         if way in ["heuristic_CCL", "CCL", "GPU"]:
-            far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
+            far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 50)
         if way == "GPU":
             print("gpu")
             delta, _ = delta_hyp_GPU(dist_matrix, far_away_pairs)
@@ -359,8 +578,12 @@ def delta_hyp_rel(X: np.ndarray, economic: bool = True, way="new"):
             delta = tensor_approximation(
                 d=3, b_s=dist_matrix.shape[0], func=objective_func
             )
-    else:
-        delta = delta_hyp(dist_matrix)
+    if way == "old":
+        print('here')
+        adj_m, k, delta_res, threadsperblock, blockspergrid = cuda_prep_true_delta(dist_matrix)
+        true_delta_gpu[blockspergrid, threadsperblock](adj_m, delta_res, k)
+        delta = delta_res[0]
+        print(2 * delta_res[0] / diam)
     delta_rel = 2 * delta / diam
     return delta_rel, diam
 
