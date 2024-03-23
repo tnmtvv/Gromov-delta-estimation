@@ -4,6 +4,8 @@ import time
 import numpy as np
 from numba import cuda, jit, njit, prange
 from line_profiler import profile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from sklearn.metrics import pairwise_distances
 
 def calculate_frequencies(rows, cols, dict_freq):
     for i in range(rows.shape[0]):
@@ -12,6 +14,51 @@ def calculate_frequencies(rows, cols, dict_freq):
         dict_freq[tup] += 1
     return dict_freq
 
+
+def preprocessing_for_GPU(X, l):
+    print(X.shape)
+    dist_matrix = pairwise_distances(X, metric="euclidean")
+    print(dist_matrix.shape)
+    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * l)
+    return dist_matrix, far_away_pairs
+
+
+def calculate_matrices_pairs(X, max_workers_cpu, n_tries, batch_size, seed, l):
+    n_objects, _ = X.shape
+    rng = np.random.default_rng(seed)
+    matrices_pairs = []
+
+    print("available num of theads cpu " + str(max_workers_cpu))
+    for part in range(int(n_tries // max_workers_cpu) + 1):
+        if max_workers_cpu * part >= n_tries:
+            break
+        else:
+            with ThreadPoolExecutor(
+                max_workers=min(n_tries - max_workers_cpu * part, max_workers_cpu)
+            ) as executor:
+                futures = []
+                print(executor._max_workers)
+                for _ in range(executor._max_workers):
+                    if batch_size >= n_objects:
+                        print("batch_size >= n_objects")
+                        print(batch_size)
+                        print(n_objects)
+                        # `delta_hyp` selects a fixed point w.r.t which delta is computed
+                        # the fixed point always corresponds to the first object, so shuffling allows
+                        # exploring different initialization of a fixed point
+                        batch_idx = rng.permutation(n_objects)
+                    else:
+                        batch_idx = rng.choice(
+                            n_objects, batch_size, replace=False, shuffle=True
+                        )
+                    item_space = X[batch_idx]
+                    print("batch done")
+                    future = executor.submit(preprocessing_for_GPU, item_space, l)
+                    futures.append(future)
+                for _, future in enumerate(as_completed(futures)):
+                    matrix, pairs = cur_matrix_and_pairs = future.result()
+                    matrices_pairs.append(cur_matrix_and_pairs)
+        return matrices_pairs
 
 @njit(parallel=True)
 def prepare_batch_indices_flat(far_away_pairs, start_ind, end_ind, shape):
@@ -30,16 +77,6 @@ def prepare_batch_indices_flat(far_away_pairs, start_ind, end_ind, shape):
         batch_indices[6 * (indx-start_ind) + 3] = pair_1[1]*shape[1] + pair_2[1]
         batch_indices[6 * (indx-start_ind) + 3] = pair_1[0]*shape[1] + pair_2[1]
         batch_indices[6 * (indx-start_ind) + 4] = pair_1[1]*shape[1] + pair_2[0]
-        # batch_indices_row[indx - start_ind] = np.array(
-        #     [pair_1[0], pair_2[0], pair_1[0], pair_1[1], pair_1[0], pair_1[1]],
-        #     dtype=np.int32,
-        # )
-
-        # batch_indices_col[indx - start_ind] = np.array(
-        #     [pair_1[1], pair_2[1], pair_2[0], pair_2[1], pair_2[1], pair_2[0]],
-        #     dtype=np.int32,
-        # )
-
     return batch_indices
 
 def rows_cols_vals(shape, rows, cols, d_freq):
@@ -83,23 +120,11 @@ def matrix_to_triangular(arr):
 
 
 def cuda_prep_cartesian(dist_array, block_size):
-
-    # threadsperblock = (block_size, block_size)
     threadsperblock = block_size
-    
-    # print(len(dist_array))
-    
 
     blockspergrid = min(65535, int(dist_array.shape[0] / threadsperblock) + 1)
-    # blockspergrid_y = min(
-    #     65535, int(np.ceil(dist_array.shape[0] / threadsperblock[1])) + 1
-    # )
-
-    # blockspergrid = (blockspergrid_x, blockspergrid_y)
-    # blockspergrid = blockspergrid_x
     cartesian_dist_array = cuda.to_device(np.asarray(dist_array))
     delta_res = cuda.to_device(np.zeros(1))
-    # deltas_res = cuda.device_array(cartesian_dist_array.shape[0])
     return cartesian_dist_array, delta_res, threadsperblock, blockspergrid
 
 
@@ -114,7 +139,6 @@ def cuda_prep_true_delta(dist_matrix):
 
     print([k_2, k_1, k_3])
 
-
     block_size = (16, 16, 4)
     threadsperblock = block_size
     # np.int64(f"{dist_matrix.shape[0]}{dist_matrix.shape[0]}")
@@ -125,21 +149,6 @@ def cuda_prep_true_delta(dist_matrix):
     blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 
     return adj_m, k, delta_res, threadsperblock, blockspergrid
-
-
-# def cuda_prep_cartesian(dist_array, block_size):
-#     threadsperblock = (block_size, block_size)
-#     blockspergrid_x = min(
-#         65535, int(np.ceil(dist_array.shape[0] / threadsperblock[0])) + 1
-#     )
-#     blockspergrid_y = min(
-#         65535, int(np.ceil(dist_array.shape[0] / threadsperblock[1])) + 1
-#     )
-#     blockspergrid = (blockspergrid_x, blockspergrid_y)
-#     cartesian_dist_array = cuda.to_device(np.asarray(dist_array))
-#     deltas_res = cuda.device_array(cartesian_dist_array.shape[0])
-#     return cartesian_dist_array, deltas_res, threadsperblock, blockspergrid
-
 
 def cuda_prep(far_away_pairs, dist_matrix, block_size):
     x_coords, y_coords = (

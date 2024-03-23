@@ -1,10 +1,11 @@
 import numpy as np
 from lib.source.algo.algo_utils import s_delta_parallel
 from numba import cuda, njit, prange
+from lib.source.algo.algo_utils import get_far_away_pairs
 
 
 @njit(parallel=True, fastmath=True)
-def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
+def delta_hyp_condensed_CCL(adj_m: np.ndarray, l: int):
     """
     Computes Gromov's delta-hyperbolicity value with the basic approach, proposed in the article
     "On computing the Gromov hyperbolicity", 2015, by Nathann Cohen, David Coudert, Aurélien Lancin.
@@ -22,7 +23,8 @@ def delta_hyp_condensed_CCL(far_apart_pairs: np.ndarray, adj_m: np.ndarray):
     float
         The delta hyperbolicity value.
     """
-    n_samples = adj_m.shape[0]
+    far_apart_pairs = get_far_away_pairs(adj_m, adj_m.shape[0] * l)
+
     delta_hyp = 0.0
     for iter_1 in prange(1, min(300000, len(far_apart_pairs))):
         pair_1 = far_apart_pairs[iter_1]
