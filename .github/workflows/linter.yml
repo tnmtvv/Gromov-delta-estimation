@@ -25,7 +25,7 @@ jobs:
   jobs_gpu:
       runs-on: linux-amd64-gpu-v100-earliest-1
       container: # GPU jobs must run in a container
-        image: nvidia/cuda:12.0.0-base-ubuntu22.04
+        image: nvidia/cuda:12.0.0-base-ubuntu-22.04
         env:
           NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }} # GPU jobs must set this container env variable
     
