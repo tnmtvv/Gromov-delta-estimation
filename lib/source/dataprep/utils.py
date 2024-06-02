@@ -1,15 +1,18 @@
 import csv
-import gzip
-import json
 import math
 import urllib.request
-from io import BytesIO
-from timeit import default_timer as timer
 from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
+
 from scipy.sparse import csr_matrix
+
+import gzip
+import json
+
+from io import BytesIO
+from timeit import default_timer as timer
 
 
 def reindex(raw_data, index, filter_invalid=True, names=None):
@@ -83,14 +86,32 @@ def parse_lines(path, fields):
             )
 
 
-def get_reviews(data_file):
+def get_reviews(data_file, include_time=False):
     """Converts raw data to csv."""
-    fields = ["reviewerID", "asin"]
-    lines = parse_lines(data_file, fields)
+    if not include_time:
+        fields = ["reviewerID", "asin"]
+    else:
+        fields = ["reviewerID", "asin", "unixReviewTime"]
+
     pcore_data = pd.DataFrame.from_records(
         parse_lines(data_file, fields),
         columns=fields,
-    ).rename(columns={"reviewerID": "userid", "asin": "itemid"})
+    )
+
+    if include_time:
+        pcore_data.rename(
+            columns={
+                "reviewerID": "userid",
+                "asin": "movieid",
+                "unixReviewTime": "timestamp",
+            },
+            inplace=True,
+        )
+        pcore_data.to_csv("./sasrec_emb/check.csv")
+    else:
+        pcore_data.rename(
+            columns={"reviewerID": "userid", "asin": "itemid"}, inplace=True
+        )
     return pcore_data
 
 
@@ -118,6 +139,7 @@ def get_movielens_data(
     else:
         zip_contents = local_file
     ml_data = ml_genres = ml_tags = mapping = None
+    print("done")
     # loading data into memory
     with ZipFile(zip_contents) as zfile:
         zip_files = pd.Series(zfile.namelist())
@@ -171,6 +193,7 @@ def get_movielens_data(
                     names=["movieid", "imdbid", "tmdbid"],
                 )
     res = [data for data in [ml_data, ml_genres, ml_tags, mapping] if data is not None]
+    res[0].to_csv("./sasrec_emb/check_ml.csv")
     return res[0] if len(res) == 1 else res
 
 
@@ -200,11 +223,11 @@ def make_list_params(
     if var_name == "Rank":
         abs_min_rank = min_rank
         abs_max_rank = max_rank
+        print(np.linspace(abs_min_rank, abs_max_rank, num_vals_rank, dtype=int))
         return np.linspace(abs_min_rank, abs_max_rank, num_vals_rank, dtype=int)
 
     if var_name == "Batch_size":
         if percents:
-            print(dataset_matrix.shape)
             abs_min_batch = dataset_matrix.shape[1] * min_batch // 100
             abs_max_batch = dataset_matrix.shape[1] * max_batch // 100
         else:

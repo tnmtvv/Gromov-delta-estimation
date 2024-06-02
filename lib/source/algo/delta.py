@@ -22,7 +22,7 @@ def batched_delta_hyp(
     max_workers=25,
     mem_cpu_bound=16,
     mem_gpu_bound=16,
-    
+    gpu_batch=True
 ):
     """
     Estimate the Gromov's delta hyperbolicity of a dataset using batch processing.
@@ -58,9 +58,18 @@ def batched_delta_hyp(
     If economic=True, the function will use more efficient version of delta_hyp to combat better complexity.
     Pass way parameter to choose the mode.
     """
-    print("true X shape" + str(X.shape))
     results = []
     
+    if isinstance(strategy, SeparateCartesianStrategy):
+        print('pairs for calculating max workers ' + str((batch_size * (batch_size + 1) / 2) * strategy.l))
+        max_workers_cpu = min(
+        max_workers, calc_max_workers(batch_size, mem_cpu_bound, n_tries, far_away_pairs_size=batch_size * strategy.l)
+        )
+        if max_workers_cpu < 1:
+            max_workers_cpu = 1
+        max_workers_gpu = min(
+            max_workers, calc_max_workers(batch_size, mem_gpu_bound, n_tries, far_away_pairs_size=(batch_size * (batch_size + 1) / 2) * strategy.l)
+        )
     max_workers_cpu = min(
         max_workers, calc_max_workers(batch_size, mem_cpu_bound, n_tries)
     )
@@ -69,7 +78,10 @@ def batched_delta_hyp(
     max_workers_gpu = min(
         max_workers, calc_max_workers(batch_size, mem_gpu_bound, n_tries)
     )
-    if isinstance(strategy, SeparateCartesianStrategy) and max_workers_gpu >= 1:
+    print(max_workers_gpu)
+    x = cuda.device_array(1)  # resolving strange numba error
+    if not gpu_batch and isinstance(strategy, SeparateCartesianStrategy) and max_workers_gpu >= 1:
+        print("separate strategy")
         strategy = SeparateStrategy(l_multiple=strategy.l, max_workers_gpu=max_workers_gpu)
         x = cuda.device_array(1)  # resolving strange numba error
     

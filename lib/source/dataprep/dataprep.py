@@ -1,26 +1,33 @@
-import os
 from os import listdir
 from os.path import isfile, join
-from timeit import default_timer as timer
-
-import numpy as np
-from lib.source.dataprep.utils import (get_movielens_data, get_reviews,
-                                       matrix_from_observations)
 from sklearn.utils.extmath import randomized_svd
+from timeit import default_timer as timer
+import numpy as np
+
+import os
+
+from lib.source.dataprep.utils import (
+    get_movielens_data,
+    matrix_from_observations,
+    get_reviews,
+)
 
 
-def resolve_dataset_name(datafile):
+def resolve_dataset_name(datafile, emb=False):
     dataset_name = ""
     if datafile[-2:] == "gz":
         dataset_name = datafile[:-10]
     elif datafile[-3:] == "zip":
         dataset_name = datafile[:-4]
+    elif emb == True:
+        dataset_name = datafile[:-13]
     return dataset_name
 
 
 def dataset_preprocessing(dataset_name, datafile, datasets_dir):
     if dataset_name in ("ml-1m", "movieLens20m", "ml-20m"):
-        full_path = os.path.join(datasets_dir, dataset_name)
+        full_path = os.path.join(datasets_dir, dataset_name + '.zip')
+        print(full_path)
         if os.path.exists(full_path):
             cur_df = get_movielens_data(full_path)
         else:
