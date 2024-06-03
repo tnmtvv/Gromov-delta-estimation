@@ -1,11 +1,22 @@
 import math
 import time
+from typing import Tuple
 
 import numpy as np
 from numba import cuda, jit, njit, prange
 from line_profiler import profile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.metrics import pairwise_distances
+
+@njit(parallel=True)
+def batch_flatten(indices, dist_matrix_flat):
+  num = indices.shape[0]
+  batch = np.zeros(indices.shape[0], dtype='double')
+
+  for i in range(0, num):
+    batch[i] = dist_matrix_flat[indices[i]]
+  return batch
+
 
 def calculate_frequencies(rows, cols, dict_freq):
     for i in range(rows.shape[0]):
@@ -19,7 +30,11 @@ def preprocessing_for_GPU(X, l):
     print(X.shape)
     dist_matrix = pairwise_distances(X, metric="euclidean")
     print(dist_matrix.shape)
-    far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * l)
+    n = dist_matrix.shape[0]
+    print(f"all pairs {n * (n + 1) / 2}")
+    print(f'{l}')
+    far_away_pairs = get_far_away_pairs(dist_matrix, int((n * (n + 1) / 2 )* l))
+    print(f"len pair prep: {len(far_away_pairs)}")
     return dist_matrix, far_away_pairs
 
 
@@ -53,6 +68,7 @@ def calculate_matrices_pairs(X, max_workers_cpu, n_tries, batch_size, seed, l):
                         )
                     item_space = X[batch_idx]
                     print("batch done")
+                    print("item space shape" + str(X.shape))
                     future = executor.submit(preprocessing_for_GPU, item_space, l)
                     futures.append(future)
                 for _, future in enumerate(as_completed(futures)):
@@ -64,20 +80,48 @@ def calculate_matrices_pairs(X, max_workers_cpu, n_tries, batch_size, seed, l):
 def prepare_batch_indices_flat(far_away_pairs, start_ind, end_ind, shape):
     batch_indices = np.empty(int(end_ind - start_ind) * 6, dtype=np.int32)
 
+    for indx in prange(start_ind, end_ind):
+        i, j = indx_to_2d(indx)
+
+        pair_1 = far_away_pairs[i]
+        pair_2 = far_away_pairs[j]
+ 
+        batch_indices[6 * (indx-start_ind) + 0] = pair_1[0] * shape[0] + pair_1[1]
+        batch_indices[6 * (indx-start_ind) + 1] = pair_2[0] * shape[0] + pair_2[1]
+        batch_indices[6 * (indx-start_ind) + 2] = pair_1[0] * shape[0] + pair_2[0]
+        batch_indices[6 * (indx-start_ind) + 3] = pair_1[1] * shape[0] + pair_2[1]
+        batch_indices[6 * (indx-start_ind) + 4] = pair_1[0] * shape[0] + pair_2[1]
+        batch_indices[6 * (indx-start_ind) + 5] = pair_1[1] * shape[0] + pair_2[0]
+    return batch_indices
+
+@njit(parallel=True)
+def prepare_batch_indices(far_away_pairs, start_ind, end_ind):
+    batch_indices_rows = np.empty(int(end_ind - start_ind) * 6, dtype=np.int32)
+    batch_indices_cols = np.empty(int(end_ind - start_ind) * 6, dtype=np.int32)
 
     for indx in prange(start_ind, end_ind):
         i, j = indx_to_2d(indx)
 
         pair_1 = far_away_pairs[i]
         pair_2 = far_away_pairs[j]
+ 
+        batch_indices_rows[6 * (indx-start_ind) + 0] = pair_1[0]
+        batch_indices_rows[6 * (indx-start_ind) + 1] = pair_2[0]
+        batch_indices_rows[6 * (indx-start_ind) + 2] = pair_1[0]
+        batch_indices_rows[6 * (indx-start_ind) + 3] = pair_1[1]
+        batch_indices_rows[6 * (indx-start_ind) + 4] = pair_1[0]
+        batch_indices_rows[6 * (indx-start_ind) + 5] = pair_1[1]
 
-        batch_indices[6 * (indx-start_ind)] = pair_1[0]*shape[1] + pair_1[1]
-        batch_indices[6 * (indx-start_ind) + 1] = pair_2[0]*shape[1] + pair_2[1]
-        batch_indices[6 * (indx-start_ind) + 2] = pair_1[0]*shape[1] + pair_2[0]
-        batch_indices[6 * (indx-start_ind) + 3] = pair_1[1]*shape[1] + pair_2[1]
-        batch_indices[6 * (indx-start_ind) + 3] = pair_1[0]*shape[1] + pair_2[1]
-        batch_indices[6 * (indx-start_ind) + 4] = pair_1[1]*shape[1] + pair_2[0]
-    return batch_indices
+
+        batch_indices_cols[6 * (indx-start_ind) + 0] = pair_1[1]
+        batch_indices_cols[6 * (indx-start_ind) + 1] = pair_2[1]
+        batch_indices_cols[6 * (indx-start_ind) + 2] = pair_2[0]
+        batch_indices_cols[6 * (indx-start_ind) + 3] = pair_2[1]
+        batch_indices_cols[6 * (indx-start_ind) + 4] = pair_2[1]
+        batch_indices_cols[6 * (indx-start_ind) + 5] = pair_2[0]
+    return batch_indices_rows, batch_indices_cols
+
+
 
 def rows_cols_vals(shape, rows, cols, d_freq):
     true_rows = np.arange(shape[0])
@@ -102,6 +146,7 @@ def add_data(csv_path, dict_vals):
 
 def get_far_away_pairs(A, N):
     a = -A.ravel()
+    N = min(a.shape[0]-1, N)
     a_indx = np.argpartition(a, N)
     indx_sorted = zip(
         *np.unravel_index(sorted(a_indx[: N + 1], key=lambda i: a[i]), A.shape)
@@ -129,10 +174,11 @@ def cuda_prep_cartesian(dist_array, block_size):
 
 
 def cuda_prep_true_delta(dist_matrix):
-    k_1 = int(math.log2(dist_matrix.shape[0])) + 1
-    k_2 = 2 ** k_1 - 1
+    k_1 = int(math.log2(dist_matrix.shape[0])) + 1 # ближайшая сверху степень двойки
+    k_2 = 2 ** k_1 - 1 # самое большое число, помещающееся в эту степень двойки (как 255 = 2 ** 8 - 1)
     k_3 = dist_matrix.shape[0]
     adj_m = cuda.to_device(dist_matrix.flatten()) 
+
 
     k = cuda.to_device([k_2, k_1, k_3])
     delta_res = cuda.to_device(np.zeros(1))
@@ -141,14 +187,17 @@ def cuda_prep_true_delta(dist_matrix):
 
     block_size = (16, 16, 4)
     threadsperblock = block_size
-    # np.int64(f"{dist_matrix.shape[0]}{dist_matrix.shape[0]}")
-    blockspergrid_x = min(65535, int(np.ceil(dist_matrix.shape[0] ** 2 / threadsperblock[0])) + 1)
+
+    diff_num = int((2 * k_1) - math.log2(min(65536, int((2 ** (2 * k_1)) / threadsperblock[0]))  * 16)) # difference between the closest power of two (from the top) and factual overall number of available threads of cuda device
+    diff_num_arr = cuda.to_device([diff_num])
+
+    blockspergrid_x = min(65535, int((2 ** (2 * k_1)) / threadsperblock[0]) - 1)
     blockspergrid_y = min(65535, int(np.ceil(dist_matrix.shape[0] / threadsperblock[1])) + 1)
     blockspergrid_z = min(65535, int(np.ceil(dist_matrix.shape[0] / threadsperblock[2])) + 1)
 
     blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
 
-    return adj_m, k, delta_res, threadsperblock, blockspergrid
+    return adj_m, k, diff_num_arr, delta_res, threadsperblock, blockspergrid
 
 def cuda_prep(far_away_pairs, dist_matrix, block_size):
     x_coords, y_coords = (
@@ -167,8 +216,8 @@ def cuda_prep(far_away_pairs, dist_matrix, block_size):
     n = len(x_coord_pairs)
 
     threadsperblock = (block_size, block_size)
-    blockspergrid_x = int(np.ceil(n / threadsperblock[0])) + 1
-    blockspergrid_y = int(np.ceil(n / threadsperblock[1])) + 1
+    blockspergrid_x = min(65535,int(np.ceil(n / threadsperblock[0])) + 1)
+    blockspergrid_y = min(65535,int(np.ceil(n / threadsperblock[1])) + 1)
     blockspergrid = (blockspergrid_x, blockspergrid_y)
     return (
         n,
@@ -182,9 +231,12 @@ def cuda_prep(far_away_pairs, dist_matrix, block_size):
     )
 
 
-def calc_max_workers(batch_size, mem_bound, n_tries):
+def calc_max_workers(batch_size, mem_bound, n_tries, far_away_pairs_size=0):
     matrix_size_gb = (batch_size * batch_size * 8) / math.pow(10, 9)
-    max_workers_theory = int(mem_bound // (matrix_size_gb * 2))
+    pairs_size_gb = (far_away_pairs_size * 2 * 8) / math.pow(10, 9)
+
+    all_size_gb = matrix_size_gb + pairs_size_gb
+    max_workers_theory = int(mem_bound // (all_size_gb))
     if max_workers_theory > n_tries:
         return n_tries
     else:  # think about the situation, where the matrix size itself is bigger than memory bound (max_workers_thery < 1)
@@ -200,11 +252,38 @@ def calc_max_lines(gpu_mem_bound, pairs_len):
     return max_lines
 
 
-@njit()
-def indx_to_2d(indx):
-    n = round(math.sqrt(2 * indx))
-    S_n = (1 + n) / 2 * n
-    return n, int(n - (S_n - indx) - 1)
+# @njit(fastmath=True)
+# def indx_to_2d(indx):
+#     indx = indx + 1
+#     n = math.ceil((-1 + math.sqrt(1 + 8*indx))/2)
+#     S_n = ((1 + n) / 2) * n
+#     return n, int(n - (S_n - indx) - 1)
+
+@njit(fastmath=True)
+def indx_to_2d(k: int) -> Tuple[int, int]:
+    """
+    Converts a 1D index to a 2D index following a specific pattern.
+
+    Parameters:
+    -----------
+    k : int
+        The 1D index to be converted.
+
+    Returns:
+    --------
+    Tuple[int, int]
+        The corresponding 2D index (n, m).
+    """
+    # Find n using the quadratic formula component
+    n = math.floor((1 + math.sqrt(1 + 8 * k)) / 2)
+    
+    # Calculate the corresponding triangular number T_{n-1}
+    T_n_minus_1 = (n * (n - 1)) // 2
+    
+    # Calculate m
+    m = k - T_n_minus_1
+    
+    return (n, m)
 
 
 @njit(parallel=True)
@@ -221,7 +300,7 @@ def s_delta_parallel(far_away_pairs, A, pid, x, y, h_lb):
     return np.max(delta_hyp)
 
 
-@njit(nopython=False)
+@njit
 def permutations(A, k):
     r = [[i for i in range(0)]]
     for i in range(k):
@@ -229,7 +308,7 @@ def permutations(A, k):
     return r
 
 
-@njit(nopython=False)
+@njit
 def combinations(A, k):
     return [item for item in permutations(A, k) if sorted(item) == item]
 
