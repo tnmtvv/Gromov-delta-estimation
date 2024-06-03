@@ -300,7 +300,7 @@ def s_delta_parallel(far_away_pairs, A, pid, x, y, h_lb):
     return np.max(delta_hyp)
 
 
-@njit(nopython=False)
+@njit
 def permutations(A, k):
     r = [[i for i in range(0)]]
     for i in range(k):
@@ -308,7 +308,7 @@ def permutations(A, k):
     return r
 
 
-@njit(nopython=False)
+@njit
 def combinations(A, k):
     return [item for item in permutations(A, k) if sorted(item) == item]
 

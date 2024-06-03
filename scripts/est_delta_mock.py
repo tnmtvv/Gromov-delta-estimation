@@ -52,6 +52,7 @@ def build_csv(
     max_rank=0,
     num_vals_batch_size=10,
     num_vals_rank=10,
+    compare=False,
     verbose=True,
     percents=True,
     ub=False,
@@ -212,6 +213,7 @@ def main(
     max_rank,
     grid_batch_size,
     grid_rank,
+    compare,
     verbose,
     percents,
 ):
@@ -240,6 +242,7 @@ def main(
             max_rank,
             num_vals_batch_size=grid_batch_size,
             num_vals_rank=grid_rank,
+            compare=compare,
             verbose=verbose,
             percents=percents,
         )

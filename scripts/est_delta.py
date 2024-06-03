@@ -41,8 +41,8 @@ def build_csv(
     ub=False,
 ):
     """Execute all the experiments according dependencies written in the delta_config file and fills csv file."""
-    datafiles = [f for f in listdir(datasets_dir) if isfile(join(datasets_dir, f))]
-    # datafiles = ['ml-1m.zip']
+    # datafiles = [f for f in listdir(datasets_dir) if isfile(join(datasets_dir, f))]
+    datafiles = ['ml-1m.zip']
     svds = [f for f in listdir(svd_dir) if isfile(join(svd_dir, f))]
 
     rng = np.random.default_rng(42)
@@ -108,10 +108,10 @@ def build_csv(
             for l in l_s:
                 strategies = {
                     "CCL GPU": SeparateCartesianStrategy(
-                        l_multiple=l, mem_gpu_bound=80
+                        l_multiple=l, mem_gpu_bound=16
                     ),
                     "CCL GPU-batch": SeparateCartesianStrategy(
-                        l_multiple=l, mem_gpu_bound=80
+                        l_multiple=l, mem_gpu_bound=16
                     ),
                     "condensed": UniteStrategy(strategy=CondensedStrategy()),
                     "heuristic": UniteStrategy(strategy=HeuristicTopKStrategy()),
@@ -188,18 +188,6 @@ def build_csv(
                         #     print("done rank " + str(ranks[indx]))
                 if verbose:
                     print("done " + str(way))
-        # way = 'GPU'
-        # emb_matricies = [f for f in listdir("/workspace/embeddings/emb_ml-1m") if isfile(join("/workspace/embeddings", f))]
-        # print(emb_matricies)
-        # ranks = [32, 64, 128, 256, 512, 1024, 2048, 3706]
-        # ranks = [int(f[4:-4]) for f in listdir("/workspace/embeddings") if isfile(join("/workspace/embeddings", f))]
-        # ranks = [3000 for f in listdir("/workspace/embeddings/emb_ml-1m")]
-        # for indx, emb_file in enumerate(emb_matricies):
-        # item_space = np.load(join("/workspace/embeddings/emb_ml-1m", datafile), allow_pickle=True)
-        # print(item_space)
-        # for b_s in val_list_dict["Batch_size"]:
-        #     for n_try in val_list_dict["N_tries"]:
-
 
 @profile
 def main(

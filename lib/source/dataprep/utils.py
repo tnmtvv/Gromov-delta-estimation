@@ -193,7 +193,7 @@ def get_movielens_data(
                     names=["movieid", "imdbid", "tmdbid"],
                 )
     res = [data for data in [ml_data, ml_genres, ml_tags, mapping] if data is not None]
-    res[0].to_csv("./sasrec_emb/check_ml.csv")
+    # res[0].to_csv("./sasrec_emb/check_ml.csv")
     return res[0] if len(res) == 1 else res
 
 

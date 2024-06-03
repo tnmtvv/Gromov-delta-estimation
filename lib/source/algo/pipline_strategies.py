@@ -98,7 +98,8 @@ class SeparateStrategy:
                         )
                         futures.append(future)
                     for j, future in enumerate(as_completed(futures)):
-                        res = future.result()
+                        dist_matrix = matrices_pairs[part_gpu * self.max_workers_gpu + i][0]
+                        res = future.result(), np.max(dist_matrix)
                         print("res: " + str(res))
                         results.append(res)
         return results
@@ -120,6 +121,6 @@ class SeparateCartesianStrategy(PipelineStrategy):
                 far_away_pairs=np.asarray(matrices_pairs[i][1], dtype=np.int32),
                 all_threads=1024,
                 mem_gpu_bound=self.mem_gpu_bound,
-            )
+            ), np.max(matrices_pairs[i][0])
             results.append(res_2)
         return results

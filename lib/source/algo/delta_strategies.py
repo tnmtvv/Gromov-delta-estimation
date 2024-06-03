@@ -21,25 +21,15 @@ class HeuristicTopKStrategy(DeltaStrategy):
         const = min(50, dist_matrix.shape[0] - 1)
         # delta = delta_hyp_condensed_heuristic(dist_matrix, const)
         delta = hypdelta(dist_matrix, device="cpu", strategy="condensed")
-        return 2 * delta / diam, diam
+        return delta, diam
 
 
 class CCLStrategy(DeltaStrategy):
     def calculate_delta(self, X: np.ndarray) -> float:
         dist_matrix = pairwise_distances(X)
         diam = np.max(dist_matrix)
-        delta = hypdelta(dist_matrix, device="cpu", l=0.05)
-        return 2 * delta / diam, diam
-
-
-# class CCLHeuristicStrategy(DeltaStrategy):
-#     def calculate_delta(self, X: np.ndarray) -> float:
-#         dist_matrix = pairwise_distances(X)
-#         diam = np.max(dist_matrix)
-#         far_away_pairs = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 70)
-#         max_iter = 100000
-#         delta = delta_CCL_heuristic(dist_matrix, typed.List(far_away_pairs), max_iter)
-#         return delta, diam
+        delta = hypdelta(dist_matrix, strategy="CCL", device="cpu", l=0.05)
+        return delta, diam
 
 
 class CondensedStrategy(DeltaStrategy):
@@ -49,7 +39,7 @@ class CondensedStrategy(DeltaStrategy):
         delta = hypdelta(
             dist_matrix, device="cpu", strategy="condensed", heuristic="False"
         )
-        return 2 * delta / diam, diam
+        return delta, diam
 
 
 class TrueDeltaGPUStrategy:
@@ -58,7 +48,7 @@ class TrueDeltaGPUStrategy:
         dist_matrix = pairwise_distances(X)
         diam = np.max(dist_matrix)
         delta = hypdelta(dist_matrix, device="gpu", strategy="naive")
-        return 2 * delta / diam, diam
+        return delta, diam
 
 
 class TrueDeltaStrategy:
@@ -84,4 +74,4 @@ class TrueDeltaStrategy:
         dist_matrix = pairwise_distances(X)
         diam = np.max(dist_matrix)
         delta = hypdelta(dist_matrix, device="cpu", strategy="naive")
-        return 2 * delta / diam, diam
+        return delta, diam
