@@ -3,7 +3,7 @@ import numpy as np
 import sys
 import math
 from timeit import default_timer as timer
-import random
+from sklearn.metrics import pairwise_distances
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -13,6 +13,8 @@ def indx_to_2d(indx):
     n = round(math.sqrt(2 * indx))
     S_n = (1 + n) / 2 * n
     return n, int(n - (S_n - indx) - 1)
+
+    
 
 
 def build_dist_matrix(data):
@@ -59,25 +61,22 @@ def prepare_batch_indices(far_away_pairs, start_ind, end_ind):
     return batch_indices_row, batch_indices_col
 
 
-def generate_indices(num, dim):
-    return [
-        (random.randint(0, dim - 1), random.randint(0, dim - 1)) for _ in range(num)
-    ]
-
-
 def experiments():
-    dims = [100, 500, 1000, 5000]
+    x = cuda.device_array(1)
+    dims = [5000]
 
     times = []
     for dim in dims:
         point_matr = generate_synthetic_points(3, dim)
-        dist_matrix = build_dist_matrix(point_matr)
+        dist_matrix = pairwise_distances(point_matr)
         del point_matr
 
         indices = get_far_away_pairs(dist_matrix, dist_matrix.shape[0] * 20)
         print(len(indices))
         rows, cols = prepare_batch_indices(indices, 0, len(indices))
         time_start = timer()
+        print(f"rows.shape: {rows.shape}")
+        print(f"cols.shape: {cols.shape}")
         batch = dist_matrix[
             rows.reshape(-1),
             cols.reshape(-1),
