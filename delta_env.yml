@@ -20,6 +20,7 @@ dependencies:
     - git+https://github.com/leymir/hyperbolic-image-embeddings.git@6633edb
     - teneva==0.14.8
     - protes==0.3.4
+    - hypdelta==0.1.1
   - optuna=2.10.1
   - requests=2.31.0
   - scikit-learn=1.3.0 
