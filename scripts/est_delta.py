@@ -121,7 +121,7 @@ def build_csv(
                 }
 
                 svd_time_start = timer()
-                S, V = svd_decomp(
+                S, V_T = svd_decomp(
                     dataset_name, max_rank, matr_from_observ, svds, svd_dir
                 )
                 svd_time = timer() - svd_time_start
@@ -131,14 +131,14 @@ def build_csv(
                     svd_time = 0
 
                 if ub:
-                    item_space = V.T[:, :max_rank] @ np.diag(S[:max_rank])
+                    item_space = V_T.T[:, :max_rank] @ np.diag(S[:max_rank])
                     print(
                         f"upper bound for {dataset_name}"
                         + str(np.min(item_space) / (2 * np.max(item_space)))
                     )
                 else:
                     for rank in val_list_dict["Rank"]:
-                        item_space = V.T[:, :rank] @ np.diag(
+                        item_space = V_T.T[:, :rank] @ np.diag(
                             S[:rank]
                         )  # making item space from svd matrices
                         for batch in val_list_dict["Batch_size"]:
