@@ -42,7 +42,7 @@ def build_csv(
 ):
     """Execute all the experiments according dependencies written in the delta_config file and fills csv file."""
     # datafiles = [f for f in listdir(datasets_dir) if isfile(join(datasets_dir, f))]
-    datafiles = ['ml-1m.zip']
+    datafiles = ["ml-1m.zip"]
     svds = [f for f in listdir(svd_dir) if isfile(join(svd_dir, f))]
 
     rng = np.random.default_rng(42)
@@ -121,7 +121,7 @@ def build_csv(
                 }
 
                 svd_time_start = timer()
-                correct_S, V, indices = svd_decomp(
+                S, V = svd_decomp(
                     dataset_name, max_rank, matr_from_observ, svds, svd_dir
                 )
                 svd_time = timer() - svd_time_start
@@ -131,17 +131,15 @@ def build_csv(
                     svd_time = 0
 
                 if ub:
-                    item_space = V.T[:, indices[:max_rank]] @ np.diag(
-                        correct_S[:max_rank]
-                    )
+                    item_space = V.T[:, :max_rank] @ np.diag(S[:max_rank])
                     print(
                         f"upper bound for {dataset_name}"
                         + str(np.min(item_space) / (2 * np.max(item_space)))
                     )
                 else:
                     for rank in val_list_dict["Rank"]:
-                        item_space = V.T[:, indices[:rank]] @ np.diag(
-                            correct_S[:rank]
+                        item_space = V.T[:, :rank] @ np.diag(
+                            S[:rank]
                         )  # making item space from svd matrices
                         for batch in val_list_dict["Batch_size"]:
                             for n_try in val_list_dict["N_tries"]:
@@ -188,6 +186,7 @@ def build_csv(
                         #     print("done rank " + str(ranks[indx]))
                 if verbose:
                     print("done " + str(way))
+
 
 @profile
 def main(

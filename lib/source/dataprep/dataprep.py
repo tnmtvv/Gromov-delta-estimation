@@ -26,7 +26,7 @@ def resolve_dataset_name(datafile, emb=False):
 
 def dataset_preprocessing(dataset_name, datafile, datasets_dir):
     if dataset_name in ("ml-1m", "movieLens20m", "ml-20m"):
-        full_path = os.path.join(datasets_dir, dataset_name + '.zip')
+        full_path = os.path.join(datasets_dir, dataset_name + ".zip")
         print(full_path)
         if os.path.exists(full_path):
             cur_df = get_movielens_data(full_path)
@@ -49,10 +49,10 @@ def svd_decomp(dataset_name, max_rank, matr_from_observ, svds, svd_dir):
         f"{dataset_name}_S_matrix_{max_rank}.npy"
         and f"{dataset_name}_V_matrix_{max_rank}.npy" in svds
     ):  # if there are saved matrices, taking them from directory, else executing svd and save the result
-        V = np.load(join(svd_dir, f"{dataset_name}_V_matrix_{max_rank}.npy"))
+        V_T = np.load(join(svd_dir, f"{dataset_name}_V_matrix_{max_rank}.npy"))
         S = np.load(join(svd_dir, f"{dataset_name}_S_matrix_{max_rank}.npy"))
     else:
-        _, S, V = randomized_svd(matr_from_observ, n_components=max_rank)
+        _, S, V_T = randomized_svd(matr_from_observ, n_components=max_rank)
         with open(
             join(svd_dir, f"{dataset_name}_S_matrix_{max_rank}.npy"), "wb+"
         ) as file:
@@ -60,9 +60,8 @@ def svd_decomp(dataset_name, max_rank, matr_from_observ, svds, svd_dir):
         with open(
             join(svd_dir, f"{dataset_name}_V_matrix_{max_rank}.npy"), "wb+"
         ) as file:
-            np.save(file, V)
+            np.save(file, V_T)
     indices = np.flip(np.argsort(S))
-    correct_S = [
-        S[i] for i in indices
-    ]  # randomized_svd not guarantees right order of eigen values
-    return correct_S, V, indices
+    correct_S = [indices]  # randomized_svd not guarantees right order of eigen values
+    correct_V_T = V_T[indices]
+    return correct_S, correct_V_T
