@@ -6,6 +6,6 @@ Default_vals:
        'N_tries': [5]
        'Way': ['heuristic']
 
-Path_to_datasets: 'G:\datasets\Small'
-Path_to_csvs: 'C:\Users\tanya\GitHub\Gromov-delta-estimation\results\csvs'
-Path_to_svds: 'D:\DeltaEstimation\DeltaEstimation\SVD'
+Path_to_datasets: '/workspace/datasets'
+Path_to_csvs: '/workspace/csvs'
+Path_to_svds: '/workspace/svds'
